@@ -57,7 +57,7 @@ function safeHref(href) {
   }
 }
 
-function highlight(code, language) {
+export function highlight(code, language) {
   if (language && hljs.getLanguage(language)) {
     return hljs.highlight(code, { language, ignoreIllegals: true }).value
   }
@@ -90,7 +90,7 @@ const markdown = new Marked({
 
 // highlight.js output may open a span on one line and close it on a later one. Each line
 // is closed and reopened so it stands alone, which lets every line get its own number.
-function splitLines(html) {
+export function splitLines(html) {
   const lines = []
   const open = []
   let current = ''

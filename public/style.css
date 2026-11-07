@@ -212,3 +212,37 @@ button:focus-visible, .button:focus-visible, input:focus-visible, .drop:focus-wi
 .hljs-deletion { color: var(--danger); }
 .hljs-emphasis { font-style: italic; }
 .hljs-strong { font-weight: 700; }
+
+/* Sign-in settings */
+.security { margin-top: 28px; padding: 14px 18px; }
+.security summary { cursor: pointer; font-weight: 600; }
+.security[open] summary { margin-bottom: 10px; }
+.passkeys { list-style: none; margin: 12px 0; padding: 0; display: grid; gap: 8px; }
+.passkey { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.security-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.check { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
+.small { font-size: 0.82rem; }
+#switch { width: 100%; margin-top: 4px; }
+
+/* Upload options and the file list tools */
+.upload-options { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 18px; margin-top: 12px; font-size: 0.9rem; }
+.upload-options label:not(.check) { display: grid; gap: 4px; color: var(--muted); }
+.upload-options select, .upload-options input[type="number"] {
+  min-width: 140px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit;
+}
+.upload-options input[type="number"] { width: 140px; }
+.files-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 10px; }
+.files-bar input[type="search"] {
+  flex: 1 1 220px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit;
+}
+.file { grid-template-columns: auto 56px minmax(0, 1fr) auto; }
+.pick { width: 18px; height: 18px; accent-color: var(--accent); }
+@media (max-width: 640px) {
+  .file { grid-template-columns: auto 56px minmax(0, 1fr); }
+}
+
+/* Single sign-on */
+.or { display: flex; align-items: center; gap: 10px; margin: 18px 0 14px; color: var(--muted); font-size: 0.85rem; }
+.or::before, .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
+.sso { display: flex; justify-content: center; width: 100%; min-height: 42px; align-items: center; text-decoration: none; }
+.who { display: flex; align-items: center; gap: 12px; }

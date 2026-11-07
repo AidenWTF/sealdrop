@@ -7,6 +7,7 @@ import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { cleanJpeg } from '../src/jpegclean.js'
 import { allDiskFiles, startApp } from './helpers.js'
 
 const ffmpeg = process.env.FFMPEG_PATH ?? 'ffmpeg'
@@ -67,7 +68,9 @@ test('real media gets correct types, sizes and thumbnails, with nothing readable
 
       const raw = await fetch(file.rawUrl)
       assert.equal(raw.headers.get('content-type'), sample.type)
-      assert.ok(Buffer.from(await raw.arrayBuffer()).equals(bytes), 'the file comes back byte-exact')
+      // Photos come back without their metadata, everything else exactly as uploaded.
+      const expected = sample.type === 'image/jpeg' ? Buffer.concat(await Array.fromAsync(cleanJpeg((async function* () { yield bytes })()))) : bytes
+      assert.ok(Buffer.from(await raw.arrayBuffer()).equals(expected), 'the file comes back as expected')
 
       const html = await (await fetch(file.pageUrl)).text()
       if (sample.kind === 'audio') {

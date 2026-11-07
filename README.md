@@ -1,12 +1,13 @@
 # SealDrop
 
-A private file host for one person. You upload, you get a secret link, and only people
+A private file host for one person, or for everyone at your Pocket ID (or other OIDC) provider. You upload, you get a secret link, and only people
 holding that link can see the file. Images, videos, sound and text files preview in the browser and embed in Discord.
 
 ## How only you can upload
 
-- **There is no sign-up.** The only account is created by `npm run setup` on the server itself. No web route can create or change it.
-- **Two factors.** Signing in needs your password and a code from your authenticator app. Each code works once.
+- **There is no sign-up.** The owner account is created by `npm run setup` on the server itself. No web route can create or change it. If you turn on OIDC, people your provider signs in (optionally only one group) can also use the site, each with a separate list of files. Nobody else can.
+- **Two factors.** Signing in needs your password and a passkey, or a code from your authenticator app. Each code works once. Passkeys are checked against this site's address, so a look-alike site can't use them. Once you have a passkey you can turn codes off.
+- **Nobody can slip in their own passkey.** The passkey list is sealed with a key that only your password unlocks, so changing it on disk makes the server ignore it.
 - **Every upload is checked before a single byte is read.** It needs a live session, a matching origin and a CSRF token. Anything else gets refused, the connection is cut and the attempt is logged.
 - **Storing a file needs a key only a signed-in session has.** The master key is unlocked by your password and kept only in memory, so without a login the server can't complete an upload at all.
 - **Deny by default.** A route that isn't listed in `src/server.js` is a 404, and the server won't start if a route doesn't declare who may use it.
@@ -28,9 +29,10 @@ Read these, because they are limits of the design:
 - **Links are the access control.** Anyone you give a link to can view, download and forward it. Delete the file in the dashboard to revoke it.
 - **Posting a link in Discord shares the file with Discord.** Everyone in the channel gets the link, and Discord's servers fetch and may keep a cached copy of the preview or file. Deleting it here can't remove Discord's copy. Don't post anything to Discord that Discord must not see.
 - **The server can read files while serving them.** Discord can only build an embed if the server decrypts on request, so this isn't browser-only end-to-end encryption. Someone who takes over the running server could capture links or files as they pass through, or wait for you to sign in. Keep the server patched.
-- **Your original file is served unchanged.** Photos can contain GPS location and other metadata. Remove it first if that matters.
+- **Only photos lose their metadata.** JPEG photos have their location, camera details, comments and attached extras (like motion photo videos) removed during upload, before anything is stored. Orientation and colour profile are kept. Untick the option on the dashboard to keep everything. Other files, including videos and PNG, HEIC or WebP images, are served exactly as uploaded and can still contain location data.
 - **A reverse proxy or CDN sees links.** Don't add access logs, and don't put this behind Cloudflare's proxy: it would see every link and decrypted file.
-- **Someone with the disk can still see some facts.** File sizes, the number of files, upload times, whether a file has a thumbnail and the size of any Discord copy are visible. Contents, names and links aren't.
+- **Someone with the disk can still see some facts.** File sizes, the number of files, upload times, whether a file has a thumbnail, the size of any Discord copy, and when an expiring link runs out are visible. Contents, names and links aren't.
+- **Members' lists are protected by `MEMBER_KEY`, not a password.** Someone with both the disk and `MEMBER_KEY` can open the file lists of people who sign in through OIDC. Keep `MEMBER_KEY` in your platform's settings, away from the data and its backups. The owner's list stays protected by the owner's password.
 - **Your password protects the disk.** Your password alone unlocks both the master key and the authenticator secret in the vault, so a stolen backup can be attacked offline. Use the generated password, or a long random one. Changing your password later doesn't change the master key, so an old backup plus the old password still opens it.
 
 ## Deploying
@@ -83,6 +85,21 @@ docker compose -f docker-compose.caddy.yml run --rm -it app node src/setup.js
 docker compose -f docker-compose.caddy.yml up -d --build
 ```
 
+### Letting everyone at Pocket ID sign in
+
+1. In Pocket ID, open **OIDC Clients** and add one for SealDrop. Set the callback URL to your `PUBLIC_URL` followed by `/oidc/callback`, for example `https://files.example.com/oidc/callback`. Keep it a confidential client (not public). Pocket ID's own client settings can limit which groups may use it.
+2. Set these in `.env` (or Coolify's environment variables) and redeploy:
+
+| Variable | Example | What it is |
+|---|---|---|
+| `OIDC_ISSUER` | `https://id.example.com` | Your Pocket ID address. |
+| `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET` | from Pocket ID | The client you just added. |
+| `OIDC_NAME` | `Pocket ID` | The sign-in button's label. |
+| `OIDC_ALLOWED_GROUP` | `family` | Optional: only this group gets in. |
+| `MEMBER_KEY` | output of `openssl rand -base64 32` | Unlocks members' file lists. Keep it off the data disk and never change it. |
+
+The login page then shows **Sign in with Pocket ID**. Each person gets their own private list: nobody sees or deletes anyone else's files, and the owner's passkey settings stay the owner's. With `docker-compose.caddy.yml`, also uncomment the `web` network for the app so it can reach Pocket ID.
+
 ## Running locally
 
 Needs Node 22.9 or newer. ffmpeg is optional but needed for video thumbnails and embed sizes.
@@ -99,6 +116,11 @@ Then open http://127.0.0.1:8080. To use another port, set `PORT` and `PUBLIC_URL
 
 ## Using it
 
+- **Expiring links.** Before uploading, choose when links stop working (after 1 hour, 1 day, 7 days or 30 days) and, optionally, a download limit. A download is a fetch of the whole file, from the Download button or the direct link. Watching a video or opening the page doesn't count, but Discord fetching an image to show it does. When a link runs out, the file is deleted, at the latest within 5 minutes.
+- **Dashboard.** Search by name, select several files to delete them together, see how much space your files and Discord copies take, and see each file's expiry, downloads left and Discord copy status.
+- **Code pictures.** Text files get a picture of their first lines with highlighting, used by Discord's embed and as the dashboard thumbnail. This needs `rsvg-convert`, which the Docker image includes.
+- **Health check.** `/healthz` answers `{"status":"ok"}` on any host name, so Coolify or Docker can tell the app is up. Both compose files use it.
+
 - **Copy link** gives the page with preview and download button. Paste this into Discord.
 - **Direct link** goes straight to the file. Paste it straight after `wget` and the file saves under its real name, even with spaces or brackets in the name.
 - Download pages show each file's size, upload date in UTC and MD5. The MD5 lets someone check that a download isn't corrupted. It isn't proof against deliberate tampering, because MD5 collisions can be forged.
@@ -114,6 +136,8 @@ Restart the server after any of these.
 | Situation | What to do |
 |---|---|
 | Change password or authenticator | Run setup again. It asks for your current password. Signed-in browsers lose their lockout exemption until they next sign in. |
+| Add or remove a passkey, or turn codes off | In the dashboard, under **Sign-in and passkeys**. |
+| Lost every passkey with codes turned off | Run setup again with your password. It turns codes back on and keeps your passkeys. |
 | Lost your authenticator | Run setup again with your password to enrol a new one. |
 | Lost your password | Run setup with `--reset`. Existing links keep working, but those files disappear from your dashboard for good, so you can no longer delete them there. |
 

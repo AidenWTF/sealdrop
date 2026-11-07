@@ -36,23 +36,37 @@ ${body}
 
 const logo = '<svg class="logo" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6.5c0 5 3.4 8.9 8 10.5 4.6-1.6 8-5.5 8-10.5V5l-8-3Zm0 6a2.5 2.5 0 0 1 1 4.8V16h-2v-3.2A2.5 2.5 0 0 1 12 8Z"/></svg>'
 
-export function loginPage(config, error = '') {
+// `hints` decides which second factors the form offers. The server checks them again.
+// `hints.oidc` is the provider's display name when sign-in through it is turned on.
+export function loginPage(config, error = '', hints = { hasPasskeys: false, codesAllowed: true, oidc: null }) {
+  const codeRow = hints.codesAllowed
+    ? `<label id="code-row">Authenticator code
+      <input id="code" type="text" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
+    </label>`
+    : ''
+  const switcher = hints.hasPasskeys && hints.codesAllowed
+    ? '<button id="switch" class="ghost" type="button" hidden>Use an authenticator code instead</button>'
+    : ''
   return page({
     title: `Sign in · ${config.siteName}`,
     bodyClass: 'center',
     referrer: 'same-origin',
+    script: '<script src="/static/login.js" defer></script>',
     body: `<main class="card login">
   <h1 class="brand">${logo}${esc(config.siteName)}</h1>
   ${error ? `<p class="error" role="alert">${esc(error)}</p>` : ''}
-  <form method="post" action="/login">
+  <p id="passkey-error" class="error" role="alert" hidden></p>
+  <form id="login" method="post" action="/login" data-passkeys="${hints.hasPasskeys ? 'yes' : 'no'}">
     <label>Password
       <input type="password" name="password" autocomplete="current-password" maxlength="1024" required autofocus>
     </label>
-    <label>Authenticator code
-      <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required>
-    </label>
-    <button class="primary" type="submit">Sign in</button>
+    <input id="passkey" type="hidden" name="passkey">
+    ${codeRow}
+    <button id="submit" class="primary" type="submit">Sign in</button>
+    ${switcher}
   </form>
+  ${hints.oidc ? `<div class="or"><span>or</span></div>
+  <a class="button sso" href="/oidc/login">Sign in with ${esc(hints.oidc)}</a>` : ''}
 </main>`,
   })
 }
@@ -64,7 +78,8 @@ export function dashboardPage(config, session) {
     script: '<script src="/static/app.js" defer></script>',
     body: `<header class="topbar">
   <span class="brand">${logo}${esc(config.siteName)}</span>
-  <button id="logout" class="ghost" type="button">Sign out</button>
+  <span class="who">${session.member ? `<span class="muted small">${esc(session.member.name)}</span>` : ''}
+  <button id="logout" class="ghost" type="button">Sign out</button></span>
 </header>
 <main class="wrap">
   <label id="drop" class="drop">
@@ -72,11 +87,41 @@ export function dashboardPage(config, session) {
     <strong>Drop files here</strong>
     <span>or click to choose. Each file gets its own secret link.</span>
   </label>
+  <div class="upload-options">
+    <label>Link expires
+      <select id="expires">
+        <option value="">Never</option>
+        <option value="3600">After 1 hour</option>
+        <option value="86400">After 1 day</option>
+        <option value="604800">After 7 days</option>
+        <option value="2592000">After 30 days</option>
+      </select>
+    </label>
+    <label>Download limit
+      <input id="max-downloads" type="number" min="1" max="1000" inputmode="numeric" placeholder="None">
+    </label>
+    <label class="check"><input id="strip" type="checkbox" checked> Remove location and camera details from photos</label>
+  </div>
   <ul id="queue" class="queue"></ul>
   <h2>Your files <span id="count" class="muted"></span></h2>
+  <div class="files-bar">
+    <input id="search" type="search" placeholder="Search by name" aria-label="Search files by name">
+    <span id="storage" class="muted small"></span>
+    <button id="delete-selected" class="danger" type="button" hidden>Delete selected</button>
+  </div>
   <p id="empty" class="muted" hidden>Nothing uploaded yet.</p>
   <ul id="files" class="files"></ul>
-</main>
+${session.member ? '' : `  <details id="security" class="card security">
+    <summary>Sign-in and passkeys</summary>
+    <p class="muted">Sign in with your password plus a passkey instead of an authenticator code. Passkeys live in your password manager, phone or security key.</p>
+    <ul id="passkeys" class="passkeys"></ul>
+    <div class="security-actions">
+      <button id="add-passkey" class="primary" type="button">Add a passkey</button>
+      <label class="check"><input id="codes-allowed" type="checkbox"> Also allow authenticator codes</label>
+    </div>
+    <p id="codes-note" class="muted small"></p>
+  </details>
+`}</main>
 <div id="toast" class="toast" role="status" hidden></div>`,
   })
 }
@@ -162,7 +207,12 @@ function embedTags(config, file, { embed, text }) {
     tags.push(tag('og:audio', raw), tag('og:audio:secure_url', raw), tag('og:audio:type', meta.type))
     if (thumb) tags.push(tag('og:image', thumb), tag('og:image:type', 'image/jpeg'), named('twitter:image', thumb))
   } else if (meta.kind === 'text') {
-    tags.push(tag('og:type', 'website'), named('twitter:card', 'summary'))
+    // A picture of the first lines, when one could be made.
+    tags.push(tag('og:type', 'website'), named('twitter:card', thumb ? 'summary_large_image' : 'summary'))
+    if (thumb) {
+      tags.push(tag('og:image', thumb), tag('og:image:type', 'image/jpeg'), named('twitter:image', thumb))
+      if (meta.width) tags.push(tag('og:image:width', meta.width), tag('og:image:height', meta.height))
+    }
   } else {
     tags.push(tag('og:type', 'website'))
   }

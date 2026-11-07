@@ -17,16 +17,17 @@ const freePort = () => new Promise((resolve) => {
   })
 })
 
-export async function makeOwnerDir(t) {
+// `cleanup: false` leaves deleting the directory to the caller, for startApp's ordered teardown.
+export async function makeOwnerDir(t, { cleanup = true } = {}) {
   const dataDir = await mkdtemp(join(tmpdir(), 'sealdrop-test-'))
-  t.after(() => rm(dataDir, { recursive: true, force: true }))
+  if (cleanup) t.after(() => rm(dataDir, { recursive: true, force: true }))
   const secrets = newSecrets()
   await writeOwner(dataDir, PASSWORD, secrets, FAST_KDF)
   return { dataDir, secrets }
 }
 
-export async function startApp(t, env = {}, existing = null) {
-  const { dataDir, secrets } = existing ?? await makeOwnerDir(t)
+export async function startApp(t, env = {}, existing = null, appOptions = {}) {
+  const { dataDir, secrets } = existing ?? await makeOwnerDir(t, { cleanup: false })
   const port = await freePort()
   const config = loadConfig({
     PUBLIC_URL: `http://127.0.0.1:${port}`, PORT: String(port), DATA_DIR: dataDir,
@@ -38,15 +39,19 @@ export async function startApp(t, env = {}, existing = null) {
     owner: await loadOwner(dataDir),
     now: () => clock.ms,
     log: (line) => events.push(JSON.parse(line)),
+    ...appOptions,
   })
   await app.init()
   await new Promise((resolve) => app.server.listen(port, '127.0.0.1', resolve))
+  // In this order, in one hook: hooks run first-registered-first, and a background copy still
+  // writing into a directory being deleted can make the delete fail, which skips later hooks.
   t.after(async () => {
-    await app.embeds.idle() // no background copy may outlive the test and its data directory
+    await app.embeds.idle()
     await new Promise((resolve) => {
       app.server.closeAllConnections()
       app.server.close(resolve)
     })
+    if (!existing) await rm(dataDir, { recursive: true, force: true })
   })
   const base = `http://127.0.0.1:${port}`
   const ctx = { app, config, clock, events, dataDir, secrets, base, port }

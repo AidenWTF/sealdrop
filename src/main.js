@@ -39,9 +39,15 @@ async function findOwner() {
 
 // Without an owner the app has nothing to serve, but it stays up rather than exiting, so
 // a container platform doesn't restart it in a loop and setup can be run inside it.
-// The placeholder only ever answers 503: no web request can create the owner.
+// The placeholder answers 503 to everything but the health check: no web request can
+// create the owner.
 async function waitForOwner() {
   const placeholder = createServer((req, res) => {
+    // Up and waiting is healthy, so the platform doesn't restart it while setup runs.
+    if (req.url === '/healthz') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' })
+      return res.end('{"status":"waiting for setup"}')
+    }
     res.writeHead(503, {
       'Content-Type': 'text/plain; charset=utf-8',
       'Content-Security-Policy': "default-src 'none'",

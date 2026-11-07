@@ -50,6 +50,14 @@ export function fileKeys(tokenBytes) {
   }
 }
 
+// A Pocket ID (OIDC) member's master key, from the server's MEMBER_KEY and their account id.
+// Whoever holds MEMBER_KEY and the disk can open members' file lists, so keep it off the disk.
+export const memberMasterKey = (serverKey, sub) => derive(serverKey, `member/${sub}`)
+
+// Authenticates the passkey list, so nobody with write access to the disk alone can add
+// their own passkey. Only the password unlocks the master key it comes from.
+export const passkeyListKey = (masterKey) => derive(masterKey, 'passkeys')
+
 // Sealed blob layout: iv(12) | tag(16) | ciphertext
 export function seal(key, plaintext, aad = '') {
   const iv = randomBytes(12)

@@ -11,6 +11,7 @@ import { DEVICES_FILE } from './auth.js'
 import { loadConfig } from './config.js'
 import { base32Encode, verifyTotp } from './crypto.js'
 import { loadOwner, newSecrets, ownerPath, unlockOwner, writeOwner } from './owner.js'
+import { readPasskeys, removePasskeyFile, writePasskeys } from './passkeys.js'
 
 process.umask(0o077)
 const config = loadConfig()
@@ -102,6 +103,17 @@ const password = await choosePassword()
 await enrollAuthenticator(secrets.totpSecret)
 await writeOwner(config.dataDir, password, secrets)
 await rm(join(config.dataDir, DEVICES_FILE), { force: true })
+if (existed && !reset) {
+  // Setup is the way back in after losing every passkey: codes work again, passkeys stay.
+  const passkeys = await readPasskeys(config.dataDir, secrets.masterKey)
+  if (passkeys.passkeys.length > 0) {
+    await writePasskeys(config.dataDir, secrets.masterKey, { ...passkeys, codesAllowed: true })
+    console.log('Authenticator codes are allowed again. Your passkeys still work.')
+  }
+} else {
+  // A new master key: passkeys from before can't be vouched for any more.
+  await removePasskeyFile(config.dataDir)
+}
 console.log(existed
   ? `\nOwner saved to ${path}. Restart the server for this to take effect.`
   : `\nOwner saved to ${path}. A server waiting for setup starts the site within a few seconds.`)

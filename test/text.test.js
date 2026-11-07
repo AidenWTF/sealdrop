@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
+import { createServer } from 'node:http'
 import { test } from 'node:test'
 import { startApp } from './helpers.js'
 
@@ -93,4 +95,45 @@ test('text still downloads from its direct link, never shown inline', async (t) 
   const html = await (await fetch(file.pageUrl)).text()
   assert.match(html, /<span class="text-lang">HTML, XML<\/span>/)
   assert.ok(html.includes('&lt;h1&gt;'))
+})
+
+// Code pictures need rsvg-convert and ffmpeg, as in the Docker image. Skipped without them:
+//   RSVG_PATH=/path/to/rsvg-convert npm test
+const rsvg = process.env.RSVG_PATH ?? 'rsvg-convert'
+let canDraw = true
+try {
+  execFileSync(rsvg, ['--version'], { stdio: 'ignore' })
+  execFileSync('ffmpeg', ['-version'], { stdio: 'ignore' })
+} catch {
+  canDraw = false
+}
+
+test('code gets a picture of its first lines for Discord, and file text cannot reach outside it', { skip: !canDraw && 'rsvg-convert or ffmpeg not available' }, async (t) => {
+  const hits = []
+  const canary = createServer((req, res) => { hits.push(req.url); res.end() })
+  await new Promise((resolve) => canary.listen(0, '127.0.0.1', resolve))
+  t.after(() => canary.close())
+  const ctx = await startApp(t, { RSVG_PATH: rsvg, FFMPEG_PATH: 'ffmpeg', FFPROBE_PATH: 'ffprobe' })
+  const session = await ctx.login()
+  const target = `http://127.0.0.1:${canary.address().port}/leak`
+  const hostile = `const x = 1 // </tspan></text><image href="${target}" width="9" height="9"/><text>\n<!DOCTYPE x [<!ENTITY e SYSTEM "${target}">]>&e;\n`
+  const file = await ctx.upload(session, hostile, 'evil.js')
+  assert.ok(file.thumbUrl, 'a picture was made')
+  const picture = Buffer.from(await (await fetch(ctx.base + file.thumbUrl)).arrayBuffer())
+  const probed = JSON.parse(execFileSync('ffprobe', ['-v', 'error', '-print_format', 'json', '-show_streams', '-f', 'mjpeg', '-'], { input: picture }))
+  assert.deepEqual([probed.streams[0].width, probed.streams[0].height], [1200, 630])
+  assert.deepEqual(hits, [], 'nothing in the file made the renderer fetch anything')
+
+  const html = await (await fetch(file.pageUrl, { headers: DISCORD })).text()
+  assert.equal(meta(html, 'twitter:card'), 'summary_large_image')
+  assert.equal(meta(html, 'og:image'), ctx.base + file.thumbUrl)
+  assert.equal(meta(html, 'og:image:width'), '1200')
+})
+
+test('without a renderer, text files still upload, just without a picture', async (t) => {
+  const ctx = await startApp(t, { RSVG_PATH: '/nonexistent/rsvg-convert' })
+  const file = await ctx.upload(await ctx.login(), 'print("hi")\n', 'hi.py')
+  assert.equal(file.thumbUrl, null)
+  const html = await (await fetch(file.pageUrl)).text()
+  assert.equal(meta(html, 'twitter:card'), 'summary')
 })

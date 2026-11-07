@@ -6,6 +6,9 @@
 //   embed       sealed record of the Discord-sized copy of a large video, keyed by the link
 //               token: its random chunk key and size, or why no copy was made
 //   embed-data  that copy, as AES-256-GCM chunks under the record's random key
+//   expires     when the link stops working, as plain milliseconds, so expired files can
+//               be deleted without their link. Only for files with an expiry.
+//   downloads   sealed download count, for files with a download limit
 // Plaintext is never written to disk, not even temporarily.
 import { createHash, randomBytes } from 'node:crypto'
 import { createReadStream } from 'node:fs'
@@ -116,6 +119,7 @@ class Upload {
     await writeFile(join(this.dir, 'meta'), seal(this.keys.meta, JSON.stringify(meta)), PRIVATE)
     if (thumb) await writeFile(join(this.dir, 'thumb'), seal(this.keys.thumb, thumb), PRIVATE)
     await writeFile(join(this.dir, 'owner'), ownerBlob, PRIVATE)
+    if (meta.expiresAt) await writeFile(join(this.dir, 'expires'), String(meta.expiresAt), PRIVATE)
     await rename(this.dir, join(this.store.filesDir, this.keys.id))
     this.dir = null
   }
@@ -139,9 +143,56 @@ async function writeAtomic(path, bytes) {
 }
 
 export class Store {
+  #counting = new Map()
+
   constructor(dataDir) {
     this.filesDir = join(dataDir, 'files')
     this.tmpDir = join(dataDir, 'tmp')
+  }
+
+  async downloads(file) {
+    try {
+      const plain = open(file.keys.meta, await readFile(join(file.dir, 'downloads')), 'downloads')
+      return plain ? JSON.parse(plain.toString('utf8')).count : Number.MAX_SAFE_INTEGER
+    } catch {
+      return 0
+    }
+  }
+
+  // Adds one download and returns the new count. One at a time per file, so two downloads
+  // at once can't both be the last one allowed.
+  countDownload(file) {
+    const previous = this.#counting.get(file.keys.id) ?? Promise.resolve()
+    const next = previous.then(async () => {
+      const count = (await this.downloads(file)) + 1
+      await writeAtomic(join(file.dir, 'downloads'), seal(file.keys.meta, JSON.stringify({ count }), 'downloads'))
+      return count
+    })
+    const settled = next.catch(() => {})
+    this.#counting.set(file.keys.id, settled)
+    settled.then(() => {
+      if (this.#counting.get(file.keys.id) === settled) this.#counting.delete(file.keys.id)
+    })
+    return next
+  }
+
+  // True once the link has run out of time or downloads.
+  async expired(file, time) {
+    if (file.meta.expiresAt && time >= file.meta.expiresAt) return true
+    return Boolean(file.meta.maxDownloads) && (await this.downloads(file)) >= file.meta.maxDownloads
+  }
+
+  // Deletes files whose time is up, using only the plain expiry, so no link is needed.
+  async sweep(time) {
+    let removed = 0
+    for (const id of await readdir(this.filesDir).catch(() => [])) {
+      const at = Number(await readFile(join(this.filesDir, id, 'expires'), 'utf8').catch(() => ''))
+      if (at && time >= at) {
+        await rm(join(this.filesDir, id), { recursive: true, force: true })
+        removed++
+      }
+    }
+    return removed
   }
 
   async init() {
@@ -247,6 +298,15 @@ export class Store {
       if (file && file.keys.id === id) files.push(file)
     }
     return files.sort((a, b) => b.meta.createdAt - a.meta.createdAt)
+  }
+
+  // Whether this master key's dashboard lists the file, so its holder may delete it.
+  async owns(file, masterKey) {
+    try {
+      return open(masterKey, await readFile(join(file.dir, 'owner')), file.keys.id)?.toString('utf8') === file.token
+    } catch {
+      return false
+    }
   }
 
   async remove(token) {

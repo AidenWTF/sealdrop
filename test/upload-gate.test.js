@@ -195,3 +195,12 @@ test('read-only requests that declare a body are refused, so they cannot hold co
   }
   assert.equal((await ctx.raw('GET', '/robots.txt')).status, 200)
 })
+
+test('the health check answers any host name and reveals nothing else', async (t) => {
+  const ctx = await startApp(t)
+  const response = await ctx.raw('GET', '/healthz', { Host: 'anything.internal' })
+  assert.equal(response.status, 200)
+  assert.equal(response.body, '{"status":"ok"}')
+  assert.equal((await ctx.raw('GET', '/healthz?x', { Host: 'anything.internal' })).status, 421, 'only the exact path')
+  assert.equal((await ctx.raw('POST', '/healthz', { Host: 'anything.internal' })).status, 421)
+})

@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto'
 import { stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { setPriority } from 'node:os'
+import { CODE_IMAGE, codeSvg } from './codeimage.js'
 import { sendBytes } from './http.js'
 
 const FALLBACK = { type: 'application/octet-stream', kind: 'file' }
@@ -56,9 +57,13 @@ function looksLikeText(head) {
 }
 
 // `background` runs the program at the lowest CPU priority, so long encodes don't slow the site.
-function run(bin, args, { timeoutMs = 90_000, background = false } = {}) {
+function run(bin, args, { timeoutMs = 90_000, background = false, input = null } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'ignore'] })
+    const child = spawn(bin, args, { stdio: [input ? 'pipe' : 'ignore', 'pipe', 'ignore'] })
+    if (input) {
+      child.stdin.on('error', () => {}) // a program that exits early just doesn't read it all
+      child.stdin.end(input)
+    }
     if (background && child.pid) {
       try {
         setPriority(child.pid, 19)
@@ -158,8 +163,30 @@ const probe = async (config, url) => {
   return probed ? probeInfo(probed) : null
 }
 
+// SVG to JPEG with rsvg-convert, which the Docker image includes. Null without it, and the
+// text file simply has no picture. (ffmpeg's own SVG reader can't read from a pipe.)
+async function svgToJpeg(svg, config) {
+  const png = await run(config.rsvgPath, ['-f', 'png'], { input: Buffer.from(svg) })
+  if (!png?.length) return null
+  const jpeg = await run(config.ffmpegPath, [
+    '-v', 'error', '-f', 'png_pipe', '-i', '-', '-vf', 'format=yuvj420p',
+    '-c:v', 'mjpeg', '-q:v', '3', '-frames:v', '1', '-f', 'image2pipe', 'pipe:1',
+  ], { input: png })
+  return jpeg?.length ? jpeg : null
+}
+
+const CODE_SAMPLE = 8192
+
 // Best effort: a file that can't be analysed still uploads, just without a thumbnail.
-export async function analyze(sniffed, read, size, config) {
+// `name` is used only to pick the highlighting for a text file's picture.
+export async function analyze(sniffed, read, size, config, { name = '' } = {}) {
+  if (sniffed.kind === 'text' && size > 0) {
+    const pieces = []
+    for await (const piece of read(0, Math.min(size, CODE_SAMPLE) - 1)) pieces.push(piece)
+    const text = new TextDecoder('utf-8').decode(Buffer.concat(pieces)).replace(/\uFFFD$/, '')
+    const thumb = await svgToJpeg(codeSvg(text, name), config)
+    return { ...sniffed, ...(thumb ? CODE_IMAGE : {}), thumb }
+  }
   if (!['image', 'video', 'audio'].includes(sniffed.kind) || size === 0) return { ...sniffed, thumb: null }
   return withLoopback(read, size, async (url) => {
     const info = await probe(config, url)

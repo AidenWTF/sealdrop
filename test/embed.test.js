@@ -92,6 +92,11 @@ test('a large video gets an encrypted, faststart H.264 copy that only the embed 
   const raw = Buffer.from(await (await fetch(file.rawUrl)).arrayBuffer())
   assert.ok(raw.equals(original), 'the original is untouched')
 
+  const listed = await (await fetch(`${ctx.base}/api/files`, { headers: session.ownerHeaders })).json()
+  assert.deepEqual(listed.files[0].discord, { status: 'ready' })
+  assert.equal(listed.storage.files, original.length)
+  assert.equal(listed.storage.copies, copy.length)
+
   for (const { bytes, path } of await allDiskFiles(ctx.dataDir)) {
     assert.ok(!bytes.includes(copy.subarray(copy.length - 4096, copy.length - 4032)), `copy readable in ${path}`)
   }
@@ -111,6 +116,8 @@ test('videos under the size limit get no copy and embed the original', { skip },
   assert.equal(meta(html, 'og:video'), file.rawUrl)
   assert.equal((await fetch(`${ctx.base}/embed/${file.token}.mp4`)).status, 404)
   assert.equal(countEvents(ctx, 'embed_ok') + countEvents(ctx, 'embed_skipped'), 0)
+  const listed = await (await fetch(`${ctx.base}/api/files`, { headers: session.ownerHeaders })).json()
+  assert.deepEqual(listed.files[0].discord, { status: 'none' })
 })
 
 test('videos uploaded before copies existed get one when the dashboard lists them', { skip }, async (t) => {
@@ -139,6 +146,8 @@ test('a video that cannot be copied is recorded once and not retried', { skip },
   for (let i = 0; i < 2; i++) await fetch(`${ctx.base}/api/files`, { headers: session.ownerHeaders })
   await ctx.app.embeds.idle()
   assert.equal(countEvents(ctx, 'embed_skipped'), 1)
+  const listed = await (await fetch(`${ctx.base}/api/files`, { headers: session.ownerHeaders })).json()
+  assert.deepEqual(listed.files[0].discord, { status: 'skipped', reason: 'unknown length' })
   const html = await (await fetch(file.pageUrl)).text()
   assert.equal(meta(html, 'og:video'), file.rawUrl)
 })

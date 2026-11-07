@@ -144,6 +144,7 @@ test('without an owner the server stays up, answers 503, and starts once setup i
   assert.equal(waiting.status, 503)
   assert.match(await waiting.text(), /not set up yet/)
   assert.equal(child.exitCode, null, 'it keeps running instead of exiting')
+  assert.equal((await fetch(`http://127.0.0.1:${waitingPort}/healthz`)).status, 200, 'healthy while waiting, so it is not restarted')
 
   await writeOwner(dir, PASSWORD, newSecrets(), { N: 2 ** 12, r: 8, p: 1 })
   const [, appPort] = await seen(/listening on [\d.]+:(\d+)/)
@@ -153,4 +154,29 @@ test('without an owner the server stays up, answers 503, and starts once setup i
 
   child.kill('SIGTERM')
   assert.equal(await exited, 0)
+})
+
+test('running setup again turns codes back on, the way back in after losing every passkey', async (t) => {
+  const { readPasskeys, writePasskeys } = await import('../src/passkeys.js')
+  const dir = await tempDir(t)
+  const secrets = newSecrets()
+  await writeOwner(dir, PASSWORD, secrets, { N: 2 ** 12, r: 8, p: 1 })
+  const passkey = { id: 'A'.repeat(43), alg: -7, publicKey: 'x', signCount: 0, name: 'Phone', createdAt: 0, lastUsedAt: null }
+  await writePasskeys(dir, secrets.masterKey, { passkeys: [passkey], codesAllowed: false })
+
+  const next = 'a different long test password'
+  const fresh = freshAnswers(next)
+  const { code, output } = await runSetup(dir, (text, answered) => {
+    if (answered === 0) return text.includes('Current password') ? PASSWORD : null
+    return fresh(text, answered - 1)
+  })
+  assert.equal(code, 0)
+  assert.match(output, /codes are allowed again/)
+  const after = await readPasskeys(dir, secrets.masterKey)
+  assert.equal(after.tampered, false)
+  assert.equal(after.codesAllowed, true)
+  assert.equal(after.passkeys.length, 1, 'passkeys are kept')
+
+  await writeFile(join(dir, 'passkeys.json'), '{"v":1}')
+  assert.equal((await readPasskeys(dir, secrets.masterKey)).tampered, true, 'a malformed file is distrusted, not a crash')
 })

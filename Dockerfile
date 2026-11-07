@@ -1,5 +1,5 @@
 FROM node:22-alpine
-RUN apk add --no-cache ffmpeg libqrencode-tools && mkdir /data && chown node:node /data
+RUN apk add --no-cache ffmpeg libqrencode-tools rsvg-convert font-dejavu && mkdir /data && chown node:node /data
 WORKDIR /app
 COPY package.json package-lock.json ./
 # Exact versions from the lockfile, without install scripts.

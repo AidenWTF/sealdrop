@@ -76,6 +76,8 @@ export function createEmbedQueue({ store, config, audit, ramDir = RAM_DIR }) {
 
   return {
     enabled,
+    wanted,
+    queued: (file) => pending.has(file.keys.id),
 
     async init() {
       if (!existsSync(ramDir)) return
