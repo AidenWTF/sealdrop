@@ -13,7 +13,8 @@ services:
     networks:
       - internal
     environment:
-      PUBLIC_URL: https://${DOMAIN:?Set DOMAIN in .env}
+      PUBLIC_URL: ${PUBLIC_URL:-https://${DOMAIN:?Set DOMAIN in .env}}
+      PORT: ${APP_PORT:-18446}
       TRUST_PROXY: "1"
       SITE_NAME: ${SITE_NAME:-SealDrop}
       MAX_UPLOAD_GB: ${MAX_UPLOAD_GB:-50}
@@ -38,11 +39,12 @@ services:
     depends_on:
       - app
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
     environment:
       DOMAIN: ${DOMAIN}
+      APP_PORT: ${APP_PORT:-18446}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

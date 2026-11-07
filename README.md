@@ -41,7 +41,7 @@ You need a server with Docker and a domain pointing at it, with ports 80 and 443
 cp .env.example .env
 ```
 
-Set `DOMAIN` in `.env`, then create your account and start the site:
+Set `DOMAIN` in `.env`. Ports are set there too: `HTTP_PORT` and `HTTPS_PORT` (default 80 and 443) are the ports on your server, and `APP_PORT` (default 18446) is the app's port inside Docker. Certificates are issued automatically only while 80 and 443 are reachable from the internet. Then create your account and start the site:
 
 ```bash
 docker compose run --rm -it app node src/setup.js
@@ -65,7 +65,7 @@ npm run setup
 npm start
 ```
 
-Then open http://127.0.0.1:8080. Plain http is refused anywhere but localhost.
+Then open http://127.0.0.1:8080. To use another port, set `PORT` and `PUBLIC_URL` in `.env` (for example `PORT=3000` and `PUBLIC_URL=http://127.0.0.1:3000`). Plain http is refused anywhere but localhost.
 
 ## Using it
 

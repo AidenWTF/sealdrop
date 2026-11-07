@@ -8,7 +8,7 @@
 }
 
 {$DOMAIN} {
-	reverse_proxy app:8080 {
+	reverse_proxy app:{$APP_PORT:18446} {
 		flush_interval -1
 	}
 }
