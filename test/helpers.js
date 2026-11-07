@@ -41,10 +41,13 @@ export async function startApp(t, env = {}, existing = null) {
   })
   await app.init()
   await new Promise((resolve) => app.server.listen(port, '127.0.0.1', resolve))
-  t.after(() => new Promise((resolve) => {
-    app.server.closeAllConnections()
-    app.server.close(resolve)
-  }))
+  t.after(async () => {
+    await app.embeds.idle() // no background copy may outlive the test and its data directory
+    await new Promise((resolve) => {
+      app.server.closeAllConnections()
+      app.server.close(resolve)
+    })
+  })
   const base = `http://127.0.0.1:${port}`
   const ctx = { app, config, clock, events, dataDir, secrets, base, port }
 

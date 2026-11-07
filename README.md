@@ -1,7 +1,7 @@
 # SealDrop
 
 A private file host for one person. You upload, you get a secret link, and only people
-holding that link can see the file. Images and videos preview in the browser and embed in Discord.
+holding that link can see the file. Images, videos, sound and text files preview in the browser and embed in Discord.
 
 ## How only you can upload
 
@@ -19,7 +19,7 @@ holding that link can see the file. Images and videos preview in the browser and
 - Files, names, types and thumbnails are encrypted with AES-256-GCM using keys derived from that secret. Plaintext is never written to disk, including during upload, thumbnail creation and Discord copies (see below), which are encoded in memory.
 - The server stores no usable copy of the link. The dashboard's copy is encrypted with your master key. Someone who steals the disk gets ciphertext, and can't read it without a link or your password.
 - Tampered files are detected. A download is cut off instead of delivering altered data.
-- Uploaded HTML, SVG and anything else outside a short list of media types always downloads and never runs on this site.
+- Uploaded files never run on this site. Text files, HTML, SVG and scripts included, are previewed on the share page as escaped text only, and their direct link always downloads. Anything else outside a short list of media types always downloads.
 
 ## What this does not protect against
 
@@ -103,6 +103,8 @@ Then open http://127.0.0.1:8080. To use another port, set `PORT` and `PUBLIC_URL
 - **Direct link** goes straight to the file. Paste it straight after `wget` and the file saves under its real name, even with spaces or brackets in the name.
 - Download pages show each file's size, upload date in UTC and MD5. The MD5 lets someone check that a download isn't corrupted. It isn't proof against deliberate tampering, because MD5 collisions can be forged.
 - Discord won't embed a large video, so videos over 45 MB get a smaller copy just for the embed: H.264, at most 1080p, under 45 MB. It's made in the background after upload, usually within a few minutes, and the embed uses it from then on. The share page, direct link and download always give the original. Videos longer than about 13 minutes get no copy, because it would be too blurry, and embed only a thumbnail. Copies for files uploaded before this existed, or still missing after a restart, are made when you next open the dashboard.
+- **Text files** show on the share page with line numbers: code is highlighted by its file extension, and Markdown is rendered, with a Source view. Raw HTML in Markdown is shown as text, links only work for http, https and mailto, and images from elsewhere become links. Only the first 512 KB is shown. Discord shows the first lines as the embed's description.
+- **Sound files** play on the share page under their cover art, or a waveform if they have none. Discord can't play audio links, so each sound file also gets a small MP4 of the sound over a moving waveform, used only for Discord's player. Files longer than about 15 minutes get no MP4 and embed as a picture.
 - Discord plays H.264 MP4 and WebM most reliably. It may show HEVC (H.265) videos without a player. The link still works for downloading.
 
 ## Managing your account

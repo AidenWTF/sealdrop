@@ -145,3 +145,70 @@ button:focus-visible, .button:focus-visible, input:focus-visible, .drop:focus-wi
 .facts dt { color: var(--muted); }
 .facts dd { margin: 0; }
 .facts code { font: 0.8rem/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; user-select: all; }
+
+.audio-cover { width: auto; max-width: 100%; max-height: 50vh; margin: 0 auto; background: none; }
+
+/* Text previews */
+.share-text { max-width: 1100px; }
+.text-preview { min-width: 0; overflow: hidden; }
+.text-head {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;
+  padding: 10px 16px; border-bottom: 1px solid var(--line); font-size: 0.85rem;
+}
+.text-lang { font-weight: 650; }
+.text-views { display: flex; gap: 4px; margin-left: auto; }
+.text-views a, .text-views span { padding: 3px 10px; border-radius: 6px; color: var(--muted); text-decoration: none; }
+.text-views a:hover { color: var(--text); background: var(--soft); }
+.text-views [aria-current] { color: var(--text); background: var(--soft); font-weight: 600; }
+.text-note { margin: 0; padding: 10px 16px; color: var(--muted); font-size: 0.85rem; border-top: 1px solid var(--line); }
+.text-preview > .text-note:first-of-type:last-child { border-top: 0; }
+
+.code, .code-block {
+  margin: 0; overflow: auto; max-height: 75vh;
+  font: 0.82rem/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; tab-size: 4;
+}
+.code { padding: 10px 0; counter-reset: line; }
+.code .line { display: block; padding: 0 16px 0 0; white-space: pre; min-height: 1.55em; }
+.code .line::before {
+  counter-increment: line; content: counter(line);
+  display: inline-block; width: 4.5ch; margin-right: 14px; padding-right: 10px;
+  text-align: right; color: var(--muted); border-right: 1px solid var(--line); user-select: none;
+}
+
+.markdown { padding: 8px 24px 20px; line-height: 1.65; overflow-wrap: anywhere; }
+.markdown h1, .markdown h2, .markdown h3, .markdown h4 { margin: 1.3em 0 0.5em; line-height: 1.3; }
+.markdown h1 { font-size: 1.6rem; padding-bottom: 0.3em; border-bottom: 1px solid var(--line); }
+.markdown h2 { font-size: 1.3rem; padding-bottom: 0.25em; border-bottom: 1px solid var(--line); }
+.markdown p, .markdown ul, .markdown ol, .markdown blockquote, .markdown table, .markdown pre { margin: 0 0 1em; }
+.markdown a { color: var(--accent); }
+.markdown blockquote { padding: 0 1em; color: var(--muted); border-left: 3px solid var(--line); }
+.markdown code { font: 0.86em ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 0.15em 0.35em; border-radius: 5px; background: var(--soft); }
+.markdown pre.code-block { padding: 12px 14px; border-radius: 8px; background: var(--soft); }
+.markdown pre code { padding: 0; background: none; font-size: inherit; }
+.markdown table { border-collapse: collapse; display: block; overflow-x: auto; }
+.markdown th, .markdown td { padding: 6px 12px; border: 1px solid var(--line); }
+.markdown hr { border: 0; border-top: 1px solid var(--line); margin: 1.5em 0; }
+.markdown img { max-width: 100%; }
+
+/* Syntax highlighting, in the site's colours */
+:root {
+  --hl-keyword: #b42da0; --hl-string: #1b7f3b; --hl-number: #b35c00; --hl-comment: #7a8191;
+  --hl-title: #3346d3; --hl-type: #0f7c8c; --hl-attr: #9a5b00; --hl-meta: #6b5bd6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --hl-keyword: #e38bd8; --hl-string: #8fd18b; --hl-number: #f0b36d; --hl-comment: #7f8698;
+    --hl-title: #8fa0ff; --hl-type: #6fd3e0; --hl-attr: #f0c674; --hl-meta: #b6a8ff;
+  }
+}
+.hljs-keyword, .hljs-selector-tag, .hljs-built_in, .hljs-literal, .hljs-doctag { color: var(--hl-keyword); }
+.hljs-string, .hljs-regexp, .hljs-addition, .hljs-template-string, .hljs-symbol { color: var(--hl-string); }
+.hljs-number, .hljs-bullet, .hljs-variable.constant_ { color: var(--hl-number); }
+.hljs-comment, .hljs-quote { color: var(--hl-comment); font-style: italic; }
+.hljs-title, .hljs-section, .hljs-name, .hljs-selector-id, .hljs-selector-class { color: var(--hl-title); }
+.hljs-type, .hljs-class .hljs-title, .hljs-title.class_ { color: var(--hl-type); }
+.hljs-attr, .hljs-attribute, .hljs-property, .hljs-params, .hljs-variable { color: var(--hl-attr); }
+.hljs-meta, .hljs-tag, .hljs-template-variable, .hljs-link { color: var(--hl-meta); }
+.hljs-deletion { color: var(--danger); }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }

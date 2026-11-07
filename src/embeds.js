@@ -1,4 +1,5 @@
-// Makes the Discord-sized copies of large videos in the background, one at a time.
+// Makes the Discord copies in the background, one at a time: a smaller copy of each large
+// video, and an MP4 with a waveform for each sound file, since Discord can't play audio links.
 //
 // ffmpeg needs a file it can seek in to put the MP4 index at the front, so the copy is
 // written to /dev/shm, which is memory, not disk. That is no more exposed than the app's
@@ -23,14 +24,16 @@ export function createEmbedQueue({ store, config, audit, ramDir = RAM_DIR }) {
   const pending = new Map()
   let running = null
 
-  const wanted = (file) => enabled && file.meta.kind === 'video' && file.meta.size > config.discordCopyOverBytes
+  const wanted = (file) => enabled && (
+    file.meta.kind === 'audio' || (file.meta.kind === 'video' && file.meta.size > config.discordCopyOverBytes)
+  )
 
   async function makeCopy(token) {
     const file = await store.load(token)
     if (!file || await store.embed(file)) return
     const out = join(ramDir, `${prefix}${randomBytes(8).toString('hex')}.mp4`)
     try {
-      const result = await makeEmbedCopy(file.read, file.meta.size, file.meta.duration, config, out)
+      const result = await makeEmbedCopy(file.read, file.meta, config, out)
       if (result.skip) {
         await store.skipEmbed(file, result.skip)
         audit('embed_skipped', { reason: result.skip })

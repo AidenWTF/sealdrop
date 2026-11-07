@@ -1,4 +1,6 @@
 // Server-rendered HTML. Everything dynamic goes through esc().
+import { languageLabel, renderText, textLanguage, textSnippet } from './textview.js'
+
 export const esc = (value) => String(value).replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
 ))
@@ -109,17 +111,19 @@ export const paths = {
 // Images larger than this use the thumbnail in embeds, since Discord may refuse big ones.
 const MAX_EMBED_IMAGE = 8 * 1024 * 1024
 
-// `embed` is the Discord-sized copy of a large video, when there is one.
-function embedTags(config, file, embed) {
+// `embed` is the Discord copy of a large video or of a sound file, when there is one.
+// `text` is the start of a text file.
+function embedTags(config, file, { embed, text }) {
   const { meta, token } = file
   const raw = config.origin + paths.raw(token, meta.name)
   const thumb = meta.hasThumb ? config.origin + paths.thumb(token) : null
   const tag = (property, content) => `<meta property="${property}" content="${esc(content)}">`
   const named = (name, content) => `<meta name="${name}" content="${esc(content)}">`
+  const label = meta.kind === 'text' ? languageLabel(textLanguage(meta.name)) : null
   const tags = [
-    tag('og:site_name', config.siteName),
+    tag('og:site_name', label ? `${config.siteName} · ${label}` : config.siteName),
     tag('og:title', meta.name),
-    tag('og:description', formatSize(meta.size)),
+    tag('og:description', text?.text ? textSnippet(text.text) : formatSize(meta.size)),
     tag('og:url', config.origin + paths.page(token, meta.name)),
     named('theme-color', '#5b6cff'),
   ]
@@ -141,7 +145,24 @@ function embedTags(config, file, embed) {
     )
     if (thumb) tags.push(tag('og:image', thumb), tag('og:image:type', 'image/jpeg'), tag('og:image:width', width), tag('og:image:height', height), named('twitter:image', thumb))
   } else if (meta.kind === 'audio') {
-    tags.push(tag('og:type', 'music.song'), tag('og:audio', raw), tag('og:audio:secure_url', raw), tag('og:audio:type', meta.type))
+    // Discord has no audio player for links, so its player gets an MP4 of the sound with a
+    // waveform. Without that copy, or without the picture Discord requires, it gets a card.
+    if (embed && thumb) {
+      const video = config.origin + paths.embed(token)
+      tags.push(
+        tag('og:type', 'video.other'),
+        tag('og:video', video), tag('og:video:url', video), tag('og:video:secure_url', video),
+        tag('og:video:type', 'video/mp4'), tag('og:video:width', embed.width), tag('og:video:height', embed.height),
+        named('twitter:card', 'player'), named('twitter:player', video),
+        named('twitter:player:width', embed.width), named('twitter:player:height', embed.height),
+      )
+    } else {
+      tags.push(tag('og:type', 'music.song'), named('twitter:card', thumb ? 'summary_large_image' : 'summary'))
+    }
+    tags.push(tag('og:audio', raw), tag('og:audio:secure_url', raw), tag('og:audio:type', meta.type))
+    if (thumb) tags.push(tag('og:image', thumb), tag('og:image:type', 'image/jpeg'), named('twitter:image', thumb))
+  } else if (meta.kind === 'text') {
+    tags.push(tag('og:type', 'website'), named('twitter:card', 'summary'))
   } else {
     tags.push(tag('og:type', 'website'))
   }
@@ -176,30 +197,70 @@ function plainFileBody(meta, download) {
 </main>`
 }
 
-export function sharePage(config, file, embed = null) {
-  const { meta, token } = file
-  const raw = paths.raw(token, meta.name)
-  const download = paths.download(token, meta.name)
-  const poster = meta.hasThumb ? ` poster="${paths.thumb(token)}"` : ''
-  const previews = {
-    image: `<img class="preview" src="${esc(raw)}" alt="${esc(meta.name)}">`,
-    video: `<video class="preview" src="${esc(raw)}" controls playsinline preload="metadata"${poster}></video>`,
-    audio: `<audio class="preview-audio" src="${esc(raw)}" controls preload="metadata"></audio>`,
-  }
-  return page({
-    title: meta.name,
-    head: embedTags(config, file, embed),
-    bodyClass: 'center',
-    body: meta.kind === 'file' ? plainFileBody(meta, download) : `<main class="share">
-  ${previews[meta.kind]}
-  <section class="card share-info">
+function shareInfo(meta, download) {
+  return `<section class="card share-info">
     <div class="share-name">
       <h1>${esc(meta.name)}</h1>
       ${fileFacts(meta)}
     </div>
     <a class="button primary" href="${esc(download)}" download>Download</a>
+  </section>`
+}
+
+function textBody(file, text, view, download) {
+  const { meta, token } = file
+  const language = textLanguage(meta.name)
+  const label = languageLabel(language) ?? 'Text'
+  const lines = text.text === '' ? 0 : text.text.split('\n').length - (text.text.endsWith('\n') ? 1 : 0)
+  const pagePath = paths.page(token, meta.name)
+  const toggle = language === 'markdown'
+    ? `<nav class="text-views">${view === 'source'
+      ? `<a href="${esc(pagePath)}">Rendered</a><span aria-current="page">Source</span>`
+      : `<span aria-current="page">Rendered</span><a href="${esc(pagePath)}?view=source">Source</a>`}</nav>`
+    : ''
+  const note = text.truncated
+    ? `<p class="text-note">Showing the first ${esc(formatSize(text.bytes))}. Download the file for the rest.</p>`
+    : ''
+  return `<main class="share share-text">
+  <section class="card text-preview">
+    <header class="text-head">
+      <span class="text-lang">${esc(label)}</span>
+      <span class="muted">${lines.toLocaleString('en-US')} ${lines === 1 ? 'line' : 'lines'}</span>
+      ${toggle}
+    </header>
+    ${text.text === '' ? '<p class="text-note">This file is empty.</p>' : renderText(text.text, language, view)}
+    ${note}
   </section>
-</main>`,
+  ${shareInfo(meta, download)}
+</main>`
+}
+
+// `options.embed` is the Discord copy, `options.text` the start of a text file, and
+// `options.view` picks rendered or source for Markdown.
+export function sharePage(config, file, { embed = null, text = null, view = 'rendered' } = {}) {
+  const { meta, token } = file
+  const raw = paths.raw(token, meta.name)
+  const download = paths.download(token, meta.name)
+  const poster = meta.hasThumb ? ` poster="${paths.thumb(token)}"` : ''
+  const cover = meta.hasThumb ? `<img class="preview audio-cover" src="${paths.thumb(token)}" alt="">` : ''
+  const previews = {
+    image: `<img class="preview" src="${esc(raw)}" alt="${esc(meta.name)}">`,
+    video: `<video class="preview" src="${esc(raw)}" controls playsinline preload="metadata"${poster}></video>`,
+    audio: `${cover}<audio class="preview-audio" src="${esc(raw)}" controls preload="metadata"></audio>`,
+  }
+  let body
+  if (meta.kind === 'text' && text) body = textBody(file, text, view, download)
+  else if (previews[meta.kind]) {
+    body = `<main class="share">
+  ${previews[meta.kind]}
+  ${shareInfo(meta, download)}
+</main>`
+  } else body = plainFileBody(meta, download)
+  return page({
+    title: meta.name,
+    head: embedTags(config, file, { embed, text }),
+    bodyClass: 'center',
+    body,
   })
 }
 

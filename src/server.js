@@ -3,6 +3,7 @@ import { createServer } from 'node:http'
 import { Auth, ABSOLUTE_LIMIT } from './auth.js'
 import { TOKEN_PATTERN } from './crypto.js'
 import { createEmbedQueue } from './embeds.js'
+import { PREVIEW_BYTES, decodePreview } from './textview.js'
 import { attachmentHeader, cleanFileName, sendBytes } from './http.js'
 import { analyze, sniff } from './media.js'
 import { Store } from './store.js'
@@ -175,17 +176,31 @@ export function createApp(config, { owner, now = Date.now, log = console.log }) 
     sendJson(res, removed ? 200 : 404, { removed })
   }
 
+  // The start of a text file, for its preview.
+  async function readPreview(file) {
+    const length = Math.min(file.meta.size, PREVIEW_BYTES)
+    if (length === 0) return { text: '', truncated: false }
+    const pieces = []
+    for await (const piece of file.read(0, length - 1)) pieces.push(piece)
+    const truncated = file.meta.size > length
+    return { text: decodePreview(Buffer.concat(pieces), truncated), truncated, bytes: length }
+  }
+
   async function handleShare(req, res, { match }) {
     const file = await store.load(match.groups.token)
     if (!file) return sendHtml(res, 404, notFoundPage(config))
-    const embed = file.meta.kind === 'video' ? await store.embed(file) : null
-    sendHtml(res, 200, sharePage(config, file, embed?.read ? embed : null), sharePolicy)
+    const embed = ['video', 'audio'].includes(file.meta.kind) ? await store.embed(file) : null
+    const text = file.meta.kind === 'text' ? await readPreview(file) : null
+    const view = new URL(req.url, 'http://x').searchParams.get('view') === 'source' ? 'source' : 'rendered'
+    sendHtml(res, 200, sharePage(config, file, { embed: embed?.read ? embed : null, text, view }), sharePolicy)
   }
 
   async function sendFile(req, res, token, forceDownload) {
     const file = await store.load(token)
     if (!file) return sendHtml(res, 404, notFoundPage(config))
-    const previewable = file.meta.kind !== 'file'
+    // Text is previewed on the share page, but its direct link still downloads: served
+    // inline, an HTML or SVG file would be one browser quirk away from running here.
+    const previewable = ['image', 'video', 'audio'].includes(file.meta.kind)
     const asDownload = forceDownload || !previewable
     try {
       await sendBytes(req, res, {

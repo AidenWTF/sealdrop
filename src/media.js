@@ -32,7 +32,27 @@ export function sniff(head) {
   if (ascii(0, 4) === 'OggS') return { type: 'audio/ogg', kind: 'audio' }
   if (ascii(0, 4) === 'fLaC') return { type: 'audio/flac', kind: 'audio' }
   if (ascii(0, 3) === 'ID3' || (head.length >= 2 && head[0] === 0xff && (head[1] & 0xe0) === 0xe0)) return { type: 'audio/mpeg', kind: 'audio' }
+  if (looksLikeText(head)) return { type: 'text/plain; charset=utf-8', kind: 'text' }
   return FALLBACK
+}
+
+// UTF-8 (or ASCII) with no control characters other than layout ones. Text files are
+// previewed as escaped text on the share page and still download as files, so HTML,
+// SVG and scripts land here safely: they are shown, never run.
+function looksLikeText(head) {
+  if (head.length === 0) return false
+  for (const byte of head) {
+    if (byte < 0x20 && ![0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x1b].includes(byte)) return false
+    if (byte === 0x7f) return false
+  }
+  try {
+    // A full sample may end partway through a character, which isn't an error. A shorter
+    // sample is the whole file, so it must end on a complete character.
+    new TextDecoder('utf-8', { fatal: true }).decode(head, { stream: head.length >= 4096 })
+    return true
+  } catch {
+    return false
+  }
 }
 
 // `background` runs the program at the lowest CPU priority, so long encodes don't slow the site.
@@ -89,7 +109,7 @@ async function withLoopback(read, size, work) {
 // would make ffmpeg fetch addresses named inside the file.
 const INPUT_ARGS = [
   '-protocol_whitelist', 'http,tcp',
-  '-format_whitelist', 'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,gif,png_pipe,jpeg_pipe,webp_pipe',
+  '-format_whitelist', 'mov,mp4,m4a,3gp,3g2,mj2,matroska,webm,gif,png_pipe,jpeg_pipe,webp_pipe,mp3,wav,ogg,flac',
 ]
 
 function probeInfo(json) {
@@ -114,30 +134,54 @@ function probeInfo(json) {
   return info
 }
 
+const grabFrame = (config, url, seek) => run(config.ffmpegPath, [
+  '-nostdin', '-v', 'error', ...INPUT_ARGS, ...(seek ? ['-ss', String(seek)] : []), '-i', url,
+  '-map_metadata', '-1', '-frames:v', '1', '-vf', "scale='min(960,iw)':-2:flags=lanczos,format=yuvj420p",
+  '-c:v', 'mjpeg', '-q:v', '4', '-f', 'image2pipe', 'pipe:1',
+])
+
+// Colours of the site's dark theme, so sound files get a picture that matches it.
+const WAVE_COLOR = '0x7482ff'
+const WAVE_BACKGROUND = '0x191c24'
+
+// A picture of the whole sound's waveform, for files without cover art.
+const waveformPicture = (config, url) => run(config.ffmpegPath, [
+  '-nostdin', '-v', 'error', ...INPUT_ARGS, '-i', url, '-map_metadata', '-1',
+  '-filter_complex', `[0:a:0]aformat=channel_layouts=mono,showwavespic=s=960x540:colors=${WAVE_COLOR}:scale=sqrt[w];color=c=${WAVE_BACKGROUND}:s=960x540[bg];[bg][w]overlay=format=auto,format=yuvj420p`,
+  '-frames:v', '1', '-c:v', 'mjpeg', '-q:v', '4', '-f', 'image2pipe', 'pipe:1',
+])
+
+const probe = async (config, url) => {
+  const probed = await run(config.ffprobePath, [
+    '-v', 'error', ...INPUT_ARGS, '-print_format', 'json', '-show_format', '-show_streams', url,
+  ])
+  return probed ? probeInfo(probed) : null
+}
+
 // Best effort: a file that can't be analysed still uploads, just without a thumbnail.
 export async function analyze(sniffed, read, size, config) {
-  if ((sniffed.kind !== 'image' && sniffed.kind !== 'video') || size === 0) return { ...sniffed, thumb: null }
+  if (!['image', 'video', 'audio'].includes(sniffed.kind) || size === 0) return { ...sniffed, thumb: null }
   return withLoopback(read, size, async (url) => {
-    const probed = await run(config.ffprobePath, [
-      '-v', 'error', ...INPUT_ARGS, '-print_format', 'json', '-show_format', '-show_streams', url,
-    ])
-    const info = probed ? probeInfo(probed) : {}
-    const result = { ...sniffed }
-    if (info.width && info.height) Object.assign(result, { width: info.width, height: info.height })
-    if (sniffed.kind === 'video') {
-      if (info.duration) result.duration = info.duration
-      if (info.codec) result.codec = info.codec
-      // An MP4 container holding only sound is audio.
-      if (probed && !info.hasVideo && info.hasAudio) return { ...result, type: 'audio/mp4', kind: 'audio', thumb: null }
+    const info = await probe(config, url)
+    // An MP4 container holding only sound is audio.
+    const audioOnlyMp4 = sniffed.kind === 'video' && info && !info.hasVideo && info.hasAudio
+    if (sniffed.kind === 'audio' || audioOnlyMp4) {
+      const result = audioOnlyMp4 ? { ...sniffed, type: 'audio/mp4', kind: 'audio' } : { ...sniffed }
+      if (info?.duration) result.duration = info.duration
+      // Cover art shows up as a video stream. Without it, a waveform stands in.
+      let thumb = info?.hasVideo ? await grabFrame(config, url, 0) : null
+      if (!thumb?.length) thumb = await waveformPicture(config, url)
+      return { ...result, thumb: thumb?.length ? thumb : null }
     }
-    const grab = (seek) => run(config.ffmpegPath, [
-      '-nostdin', '-v', 'error', ...INPUT_ARGS, ...(seek ? ['-ss', String(seek)] : []), '-i', url,
-      '-map_metadata', '-1', '-frames:v', '1', '-vf', "scale='min(960,iw)':-2:flags=lanczos,format=yuvj420p",
-      '-c:v', 'mjpeg', '-q:v', '4', '-f', 'image2pipe', 'pipe:1',
-    ])
-    const seek = sniffed.kind === 'video' ? Math.min(1, (info.duration ?? 0) / 2) : 0
-    let thumb = await grab(seek)
-    if (seek && !thumb?.length) thumb = await grab(0)
+    const result = { ...sniffed }
+    if (info?.width && info?.height) Object.assign(result, { width: info.width, height: info.height })
+    if (sniffed.kind === 'video') {
+      if (info?.duration) result.duration = info.duration
+      if (info?.codec) result.codec = info.codec
+    }
+    const seek = sniffed.kind === 'video' ? Math.min(1, (info?.duration ?? 0) / 2) : 0
+    let thumb = await grabFrame(config, url, seek)
+    if (seek && !thumb?.length) thumb = await grabFrame(config, url, 0)
     return { ...result, thumb: thumb?.length ? thumb : null }
   })
 }
@@ -170,25 +214,54 @@ export function embedPlan(duration) {
   return { videoBps, height }
 }
 
-// Writes the copy to `outPath`, which must be in memory (see embeds.js): the MP4 index can
-// only be moved to the front, where Discord needs it, in a file ffmpeg can seek in.
-// Returns { width, height } of the copy, or { skip: reason }.
-export async function makeEmbedCopy(read, size, duration, config, outPath) {
-  const plan = embedPlan(duration)
-  if (plan.skip) return plan
-  const { videoBps, height } = plan
+// Sound files: Discord has no audio player for links, so its player gets an MP4 of the
+// sound over a moving waveform. The waveform costs little, so long files still fit.
+const EMBED_SOUND_BPS = 128_000
+const EMBED_WAVE_BPS = 200_000
+
+export function audioEmbedPlan(duration) {
+  if (!(duration > 0)) return { skip: 'unknown length' }
+  if ((EMBED_SOUND_BPS + EMBED_WAVE_BPS) * duration > EMBED_TARGET_BYTES * 8 * 0.92) return { skip: 'too long' }
+  return {}
+}
+
+function videoCopyArgs(url, { videoBps, height }) {
   // The shorter side is capped at `height`, so portrait videos are limited the same way.
   // Even sizes, because H.264 in 4:2:0 needs them.
   const scale = `scale=w='if(gt(iw\\,ih)\\,-2\\,min(${height}\\,trunc(iw/2)*2))':h='if(gt(iw\\,ih)\\,min(${height}\\,trunc(ih/2)*2)\\,-2)'`
-  return withLoopback(read, size, async (url) => {
+  return [
+    '-i', url, '-map', '0:v:0', '-map', '0:a:0?', '-sn', '-dn',
+    '-vf', `${scale},format=yuv420p`, '-fpsmax', '30',
+    '-c:v', 'libx264', '-preset', 'faster', '-profile:v', 'high', '-crf', '23',
+    '-maxrate', String(videoBps), '-bufsize', String(videoBps * 2),
+    '-c:a', 'aac', '-b:a', String(EMBED_AUDIO_BPS), '-ac', '2',
+  ]
+}
+
+function audioCopyArgs(url) {
+  return [
+    '-i', url,
+    '-filter_complex', `[0:a:0]showwaves=s=960x540:mode=cline:rate=15:colors=${WAVE_COLOR}:scale=sqrt[w];color=c=${WAVE_BACKGROUND}:s=960x540:r=15[bg];[bg][w]overlay=shortest=1:format=auto,format=yuv420p[v]`,
+    '-map', '[v]', '-map', '0:a:0',
+    '-c:v', 'libx264', '-preset', 'faster', '-profile:v', 'high', '-crf', '28',
+    '-maxrate', String(EMBED_WAVE_BPS), '-bufsize', String(EMBED_WAVE_BPS * 2),
+    '-c:a', 'aac', '-b:a', String(EMBED_SOUND_BPS), '-ac', '2',
+  ]
+}
+
+// Writes the copy of a video or sound file to `outPath`, which must be in memory (see
+// embeds.js): the MP4 index can only be moved to the front, where Discord needs it, in a
+// file ffmpeg can seek in. Returns { width, height } of the copy, or { skip: reason }.
+export async function makeEmbedCopy(read, meta, config, outPath) {
+  return withLoopback(read, meta.size, async (url) => {
+    // Files uploaded before durations were recorded are measured now.
+    const duration = meta.duration ?? (await probe(config, url))?.duration
+    const plan = meta.kind === 'audio' ? audioEmbedPlan(duration) : embedPlan(duration)
+    if (plan.skip) return plan
     const encoded = await run(config.ffmpegPath, [
-      '-nostdin', '-v', 'error', ...INPUT_ARGS, '-i', url,
-      '-map', '0:v:0', '-map', '0:a:0?', '-map_metadata', '-1', '-sn', '-dn',
-      '-vf', `${scale},format=yuv420p`, '-fpsmax', '30',
-      '-c:v', 'libx264', '-preset', 'faster', '-profile:v', 'high', '-crf', '23',
-      '-maxrate', String(videoBps), '-bufsize', String(videoBps * 2),
-      '-c:a', 'aac', '-b:a', String(EMBED_AUDIO_BPS), '-ac', '2',
-      '-movflags', '+faststart', '-f', 'mp4', '-y', outPath,
+      '-nostdin', '-v', 'error', ...INPUT_ARGS,
+      ...(meta.kind === 'audio' ? audioCopyArgs(url) : videoCopyArgs(url, plan)),
+      '-map_metadata', '-1', '-movflags', '+faststart', '-f', 'mp4', '-y', outPath,
     ], { timeoutMs: 30 * 60_000, background: true })
     if (!encoded) return { skip: 'encode failed' }
     if ((await stat(outPath)).size > EMBED_MAX_BYTES) return { skip: 'too big' }

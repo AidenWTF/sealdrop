@@ -46,11 +46,15 @@ test('active content can never run on this site', async (t) => {
   ]
   for (const [name, content] of attacks) {
     const file = await ctx.upload(session, content, name)
-    assert.equal(file.kind, 'file', name)
+    assert.ok(['file', 'text'].includes(file.kind), name)
     const response = await fetch(file.rawUrl)
     assert.equal(response.headers.get('content-type'), 'application/octet-stream', name)
     assert.match(response.headers.get('content-disposition'), /^attachment/, name)
     assert.match(response.headers.get('content-security-policy'), /sandbox/, name)
+    // Text is previewed on the share page, as escaped text only.
+    const html = await (await fetch(file.pageUrl)).text()
+    assert.ok(!html.includes('<script>alert'), `${name}: no live script in the preview`)
+    assert.ok(!html.includes('<svg xmlns'), `${name}: no live SVG in the preview`)
   }
 })
 
@@ -104,8 +108,12 @@ test('types come from file contents, not names', () => {
     [Buffer.from([0xff, 0xd8, 0xff, 0xe0]), 'image/jpeg'],
     [Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 1, 2]), Buffer.from('webm')]), 'video/webm'],
     [Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 1, 2]), Buffer.from('matroska')]), 'application/octet-stream'],
-    [Buffer.from('<!--ftypisom--><MPD>'), 'application/octet-stream'],
-    [Buffer.from('<svg></svg>'), 'application/octet-stream'], [Buffer.alloc(0), 'application/octet-stream'],
+    [Buffer.from('<!--ftypisom--><MPD>'), 'text/plain; charset=utf-8'],
+    [Buffer.from('<svg></svg>'), 'text/plain; charset=utf-8'], [Buffer.alloc(0), 'application/octet-stream'],
+    [Buffer.from('héllo wörld\n'), 'text/plain; charset=utf-8'],
+    [Buffer.from('caf\xe9', 'latin1'), 'application/octet-stream'], // not UTF-8
+    [Buffer.from('text\0with a NUL'), 'application/octet-stream'],
+    [Buffer.from('€'.repeat(2000)).subarray(0, 4096), 'text/plain; charset=utf-8'], // cut mid-character
     [Buffer.concat([Buffer.from([0, 0, 0, 24]), Buffer.from('ftypheic')]), 'application/octet-stream'],
   ]
   for (const [bytes, type] of cases) assert.equal(sniff(bytes).type, type)
@@ -177,7 +185,8 @@ test('a file still uploads when ffmpeg is missing', async (t) => {
 test('a plain file gets a download card with no preview', async (t) => {
   const ctx = await startApp(t)
   const session = await ctx.login()
-  const file = await ctx.upload(session, 'just some bytes', 'project backup.zip')
+  const binary = (text) => Buffer.concat([Buffer.from([0, 1, 2]), Buffer.from(text)])
+  const file = await ctx.upload(session, binary('just some bytes'), 'project backup.zip')
   const html = await (await fetch(file.pageUrl)).text()
   assert.ok(html.includes('class="card file-card"'))
   assert.ok(html.includes('<div class="file-icon" aria-hidden="true">ZIP</div>'))
@@ -185,9 +194,9 @@ test('a plain file gets a download card with no preview', async (t) => {
   assert.ok(html.includes(`href="/download/${file.token}/project%20backup.zip"`))
   assert.ok(!/<(img|video|audio)\b/.test(html))
 
-  const noExtension = await (await fetch((await ctx.upload(session, 'x', 'README')).pageUrl)).text()
+  const noExtension = await (await fetch((await ctx.upload(session, binary('x'), 'README')).pageUrl)).text()
   assert.ok(noExtension.includes('>FILE</div>'))
-  const hostile = await (await fetch((await ctx.upload(session, 'x', 'a.<b>x')).pageUrl)).text()
+  const hostile = await (await fetch((await ctx.upload(session, binary('x'), 'a.<b>x')).pageUrl)).text()
   assert.ok(hostile.includes('>FILE</div>'), 'an unusual extension falls back to the generic label')
   assert.ok(!hostile.includes('<b>x'))
 })

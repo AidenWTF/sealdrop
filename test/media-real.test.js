@@ -71,8 +71,11 @@ test('real media gets correct types, sizes and thumbnails, with nothing readable
 
       const html = await (await fetch(file.pageUrl)).text()
       if (sample.kind === 'audio') {
-        assert.equal(file.thumbUrl, null)
         assert.equal(meta(html, 'og:audio'), file.rawUrl)
+        assert.match(html, /<audio class="preview-audio"/)
+        const picture = Buffer.from(await (await fetch(ctx.base + file.thumbUrl)).arrayBuffer())
+        assert.deepEqual([...picture.subarray(0, 3)], [0xff, 0xd8, 0xff], 'sound files get a waveform picture')
+        assert.equal(meta(html, 'og:image'), ctx.base + file.thumbUrl)
         return
       }
       const prefix = sample.kind === 'video' ? 'og:video' : 'og:image'
