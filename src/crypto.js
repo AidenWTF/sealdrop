@@ -44,6 +44,9 @@ export function fileKeys(tokenBytes) {
     data: derive(tokenBytes, 'data'),
     meta: derive(tokenBytes, 'meta'),
     thumb: derive(tokenBytes, 'thumb'),
+    // Seals the record of the Discord-sized copy. The copy's own chunks use a random key
+    // kept inside that record, so a retried copy never reuses a chunk key.
+    embed: derive(tokenBytes, 'embed'),
   }
 }
 

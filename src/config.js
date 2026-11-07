@@ -19,5 +19,8 @@ export function loadConfig(env = process.env) {
     maxUploadBytes: Number(env.MAX_UPLOAD_GB ?? 50) * 1024 ** 3,
     ffmpegPath: env.FFMPEG_PATH ?? 'ffmpeg',
     ffprobePath: env.FFPROBE_PATH ?? 'ffprobe',
+    // Videos over this size get a smaller copy for Discord embeds. 0 turns copies off.
+    discordCopies: env.DISCORD_COPIES !== '0',
+    discordCopyOverBytes: Number(env.DISCORD_COPY_OVER_MB ?? 45) * 1024 ** 2,
   }
 }

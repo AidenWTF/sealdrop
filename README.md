@@ -16,7 +16,7 @@ holding that link can see the file. Images and videos preview in the browser and
 ## How files stay private
 
 - Each link holds a random 128-bit secret. It can't be guessed, and nothing on the server lists links publicly.
-- Files, names, types and thumbnails are encrypted with AES-256-GCM using keys derived from that secret. Plaintext is never written to disk, including during upload and thumbnail creation.
+- Files, names, types and thumbnails are encrypted with AES-256-GCM using keys derived from that secret. Plaintext is never written to disk, including during upload, thumbnail creation and Discord copies (see below), which are encoded in memory.
 - The server stores no usable copy of the link. The dashboard's copy is encrypted with your master key. Someone who steals the disk gets ciphertext, and can't read it without a link or your password.
 - Tampered files are detected. A download is cut off instead of delivering altered data.
 - Uploaded HTML, SVG and anything else outside a short list of media types always downloads and never runs on this site.
@@ -30,7 +30,7 @@ Read these, because they are limits of the design:
 - **The server can read files while serving them.** Discord can only build an embed if the server decrypts on request, so this isn't browser-only end-to-end encryption. Someone who takes over the running server could capture links or files as they pass through, or wait for you to sign in. Keep the server patched.
 - **Your original file is served unchanged.** Photos can contain GPS location and other metadata. Remove it first if that matters.
 - **A reverse proxy or CDN sees links.** Don't add access logs, and don't put this behind Cloudflare's proxy: it would see every link and decrypted file.
-- **Someone with the disk can still see some facts.** File sizes, the number of files, upload times and whether a file has a thumbnail are visible. Contents, names and links aren't.
+- **Someone with the disk can still see some facts.** File sizes, the number of files, upload times, whether a file has a thumbnail and the size of any Discord copy are visible. Contents, names and links aren't.
 - **Your password protects the disk.** Your password alone unlocks both the master key and the authenticator secret in the vault, so a stolen backup can be attacked offline. Use the generated password, or a long random one. Changing your password later doesn't change the master key, so an old backup plus the old password still opens it.
 
 ## Deploying
@@ -51,6 +51,7 @@ The settings in `.env` are grouped by setup:
 | `PUBLIC_URL` | `https://CADDY_DOMAIN` with Caddy | both | The site's public address. Required with `docker-compose.yml`. |
 | `APP_PORT` | 18446 | both | The app's port inside Docker. Never opened on the server. |
 | `SITE_NAME`, `MAX_UPLOAD_GB` | SealDrop, 50 | both | Site title and upload size limit. |
+| `DISCORD_COPIES`, `DISCORD_COPY_OVER_MB` | 1, 45 | both | Smaller copies of large videos for Discord embeds (see below). `DISCORD_COPIES=0` turns them off. |
 | `CADDY_DOMAIN` | (required) | `docker-compose.caddy.yml` | Your domain. Caddy gets its HTTPS certificate for it. |
 | `CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT` | 80 / 443 | `docker-compose.caddy.yml` | Ports Caddy opens on your server. Certificates are issued automatically only while 80 and 443 are reachable from the internet. |
 
@@ -101,7 +102,8 @@ Then open http://127.0.0.1:8080. To use another port, set `PORT` and `PUBLIC_URL
 - **Copy link** gives the page with preview and download button. Paste this into Discord.
 - **Direct link** goes straight to the file. Paste it straight after `wget` and the file saves under its real name, even with spaces or brackets in the name.
 - Download pages show each file's size, upload date in UTC and MD5. The MD5 lets someone check that a download isn't corrupted. It isn't proof against deliberate tampering, because MD5 collisions can be forged.
-- Discord plays H.264 MP4 and WebM most reliably. It may show HEVC (H.265) videos without a player, and may not embed very large files. The link still works for downloading.
+- Discord won't embed a large video, so videos over 45 MB get a smaller copy just for the embed: H.264, at most 1080p, under 45 MB. It's made in the background after upload, usually within a few minutes, and the embed uses it from then on. The share page, direct link and download always give the original. Videos longer than about 13 minutes get no copy, because it would be too blurry, and embed only a thumbnail. Copies for files uploaded before this existed, or still missing after a restart, are made when you next open the dashboard.
+- Discord plays H.264 MP4 and WebM most reliably. It may show HEVC (H.265) videos without a player. The link still works for downloading.
 
 ## Managing your account
 

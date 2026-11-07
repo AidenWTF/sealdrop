@@ -69,6 +69,9 @@ await app.init()
 if (!await ffmpegAvailable(config)) {
   console.warn('ffmpeg/ffprobe not found: uploads still work, but video previews and sizes in embeds will be missing.')
 }
+if (config.discordCopies && !app.embeds.enabled) {
+  console.warn('/dev/shm not found: large videos get no smaller copy for Discord embeds.')
+}
 server = app.server
 const port = await listen(app.server)
 console.log(`${config.siteName} listening on ${config.bindHost}:${port}, public address ${config.origin}`)

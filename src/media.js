@@ -3,7 +3,9 @@
 // which is what stops an uploaded HTML or SVG file from running script on this site.
 import { spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
+import { stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
+import { setPriority } from 'node:os'
 import { sendBytes } from './http.js'
 
 const FALLBACK = { type: 'application/octet-stream', kind: 'file' }
@@ -33,12 +35,21 @@ export function sniff(head) {
   return FALLBACK
 }
 
-function run(bin, args, timeoutMs = 90_000) {
+// `background` runs the program at the lowest CPU priority, so long encodes don't slow the site.
+function run(bin, args, { timeoutMs = 90_000, background = false } = {}) {
   return new Promise((resolve) => {
     const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'ignore'] })
-    const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs)
+    if (background && child.pid) {
+      try {
+        setPriority(child.pid, 19)
+      } catch {}
+    }
+    const kill = () => child.kill('SIGKILL')
+    process.once('exit', kill)
+    const timer = setTimeout(kill, timeoutMs)
     const finish = (value) => {
       clearTimeout(timer)
+      process.off('exit', kill)
       resolve(value)
     }
     const out = []
@@ -133,8 +144,57 @@ export async function analyze(sniffed, read, size, config) {
 
 export async function ffmpegAvailable(config) {
   const [probe, mpeg] = await Promise.all([
-    run(config.ffprobePath, ['-version'], 10_000),
-    run(config.ffmpegPath, ['-version'], 10_000),
+    run(config.ffprobePath, ['-version'], { timeoutMs: 10_000 }),
+    run(config.ffmpegPath, ['-version'], { timeoutMs: 10_000 }),
   ])
   return Boolean(probe && mpeg)
+}
+
+// Discord won't embed a video it can't fetch within its own limits, which a large file
+// exceeds (its fetches stop at 50 MB). Large videos therefore get a smaller H.264 copy that
+// is used only for the embed. The copy aims well under the limit, and is dropped if over.
+export const EMBED_TARGET_BYTES = 40 * 1024 * 1024
+export const EMBED_MAX_BYTES = 45 * 1024 * 1024
+const EMBED_AUDIO_BPS = 96_000
+const EMBED_MIN_VIDEO_BPS = 300_000
+const EMBED_MAX_VIDEO_BPS = 8_000_000
+
+// The video bitrate that fits the target for this length, and a height that suits it.
+// Below the minimum the picture would be too poor to be worth showing (about 13 minutes).
+export function embedPlan(duration) {
+  if (!(duration > 0)) return { skip: 'unknown length' }
+  const fit = Math.floor((EMBED_TARGET_BYTES * 8 * 0.92) / duration) - EMBED_AUDIO_BPS
+  if (fit < EMBED_MIN_VIDEO_BPS) return { skip: 'too long' }
+  const videoBps = Math.min(fit, EMBED_MAX_VIDEO_BPS)
+  const height = videoBps >= 2_000_000 ? 1080 : videoBps >= 1_000_000 ? 720 : 480
+  return { videoBps, height }
+}
+
+// Writes the copy to `outPath`, which must be in memory (see embeds.js): the MP4 index can
+// only be moved to the front, where Discord needs it, in a file ffmpeg can seek in.
+// Returns { width, height } of the copy, or { skip: reason }.
+export async function makeEmbedCopy(read, size, duration, config, outPath) {
+  const plan = embedPlan(duration)
+  if (plan.skip) return plan
+  const { videoBps, height } = plan
+  // The shorter side is capped at `height`, so portrait videos are limited the same way.
+  // Even sizes, because H.264 in 4:2:0 needs them.
+  const scale = `scale=w='if(gt(iw\\,ih)\\,-2\\,min(${height}\\,trunc(iw/2)*2))':h='if(gt(iw\\,ih)\\,min(${height}\\,trunc(ih/2)*2)\\,-2)'`
+  return withLoopback(read, size, async (url) => {
+    const encoded = await run(config.ffmpegPath, [
+      '-nostdin', '-v', 'error', ...INPUT_ARGS, '-i', url,
+      '-map', '0:v:0', '-map', '0:a:0?', '-map_metadata', '-1', '-sn', '-dn',
+      '-vf', `${scale},format=yuv420p`, '-fpsmax', '30',
+      '-c:v', 'libx264', '-preset', 'faster', '-profile:v', 'high', '-crf', '23',
+      '-maxrate', String(videoBps), '-bufsize', String(videoBps * 2),
+      '-c:a', 'aac', '-b:a', String(EMBED_AUDIO_BPS), '-ac', '2',
+      '-movflags', '+faststart', '-f', 'mp4', '-y', outPath,
+    ], { timeoutMs: 30 * 60_000, background: true })
+    if (!encoded) return { skip: 'encode failed' }
+    if ((await stat(outPath)).size > EMBED_MAX_BYTES) return { skip: 'too big' }
+    const probed = await run(config.ffprobePath, ['-v', 'error', '-print_format', 'json', '-show_streams', outPath])
+    const info = probed ? probeInfo(probed) : {}
+    if (!info.width || !info.height) return { skip: 'encode failed' }
+    return { width: info.width, height: info.height }
+  })
 }

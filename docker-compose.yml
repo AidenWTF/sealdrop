@@ -22,6 +22,8 @@ services:
       TRUST_PROXY: "1"
       SITE_NAME: ${SITE_NAME:-SealDrop}
       MAX_UPLOAD_GB: ${MAX_UPLOAD_GB:-50}
+      DISCORD_COPIES: ${DISCORD_COPIES:-1}
+      DISCORD_COPY_OVER_MB: ${DISCORD_COPY_OVER_MB:-45}
     # Reachable by your proxy over Docker's network only: no ports are published on the server.
     expose:
       - "${APP_PORT:-18446}"
@@ -30,6 +32,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp
+    # Discord copies are encoded in memory (/dev/shm), up to 45 MB each, one at a time.
+    shm_size: 128m
     cap_drop:
       - ALL
     security_opt:

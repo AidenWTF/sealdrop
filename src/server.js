@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { Auth, ABSOLUTE_LIMIT } from './auth.js'
 import { TOKEN_PATTERN } from './crypto.js'
+import { createEmbedQueue } from './embeds.js'
 import { attachmentHeader, cleanFileName, sendBytes } from './http.js'
 import { analyze, sniff } from './media.js'
 import { Store } from './store.js'
@@ -12,7 +13,7 @@ const staticFile = (name, type) => ({
   type,
 })
 
-const ROBOTS = 'User-agent: Discordbot\nAllow: /file/\nAllow: /raw/\nAllow: /thumb/\n\nUser-agent: *\nDisallow: /\n'
+const ROBOTS = 'User-agent: Discordbot\nAllow: /file/\nAllow: /raw/\nAllow: /thumb/\nAllow: /embed/\n\nUser-agent: *\nDisallow: /\n'
 
 const htmlPolicy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 // Share pages run no script at all.
@@ -27,6 +28,8 @@ export function createApp(config, { owner, now = Date.now, log = console.log }) 
   const audit = (event, fields = {}) => log(JSON.stringify({ at: new Date(now()).toISOString(), event, ...fields }))
   const store = new Store(config.dataDir)
   const auth = new Auth({ owner, config, audit, now })
+  const embeds = createEmbedQueue({ store, config, audit })
+  const queueEmbed = (file) => embeds.consider(file).catch((err) => audit('embed_error', { code: err.code ?? 'unknown' }))
   const assets = {
     'style.css': staticFile('style.css', 'text/css; charset=utf-8'),
     'app.js': staticFile('app.js', 'text/javascript; charset=utf-8'),
@@ -124,7 +127,10 @@ export function createApp(config, { owner, now = Date.now, log = console.log }) 
   }
 
   async function handleList(req, res, { session }) {
-    sendJson(res, 200, { files: (await store.list(session.masterKey)).map(describe) })
+    const files = await store.list(session.masterKey)
+    // Picks up copies still missing after a restart, and for files uploaded before copies existed.
+    for (const file of files) queueEmbed(file)
+    sendJson(res, 200, { files: files.map(describe) })
   }
 
   async function handleUpload(req, res, { session }) {
@@ -153,6 +159,7 @@ export function createApp(config, { owner, now = Date.now, log = console.log }) 
       await upload.commit(meta, thumb, session.masterKey)
       audit('upload_ok', { ip: clientIp(req), bytes: meta.size })
       sendJson(res, 201, describe({ token, meta }))
+      store.load(token).then((stored) => stored && queueEmbed(stored)).catch(() => {})
     } catch (err) {
       if (req.destroyed && !req.complete) return
       audit('upload_error', { code: err.code ?? 'unknown' })
@@ -171,7 +178,8 @@ export function createApp(config, { owner, now = Date.now, log = console.log }) 
   async function handleShare(req, res, { match }) {
     const file = await store.load(match.groups.token)
     if (!file) return sendHtml(res, 404, notFoundPage(config))
-    sendHtml(res, 200, sharePage(config, file), sharePolicy)
+    const embed = file.meta.kind === 'video' ? await store.embed(file) : null
+    sendHtml(res, 200, sharePage(config, file, embed?.read ? embed : null), sharePolicy)
   }
 
   async function sendFile(req, res, token, forceDownload) {
@@ -187,6 +195,28 @@ export function createApp(config, { owner, now = Date.now, log = console.log }) 
           'Content-Type': previewable ? file.meta.type : 'application/octet-stream',
           'Content-Disposition': attachmentHeader(asDownload ? 'attachment' : 'inline', file.meta.name),
           'Content-Security-Policy': previewable ? mediaPolicy : downloadPolicy,
+          'Cross-Origin-Resource-Policy': 'cross-origin',
+        },
+      })
+    } catch (err) {
+      if (err.code !== 'ERR_STREAM_PREMATURE_CLOSE') audit('integrity_failure', { id: file.keys.id })
+      res.destroy()
+    }
+  }
+
+  // The Discord-sized copy. Linked only from the share page's embed tags.
+  async function handleEmbed(req, res, { match }) {
+    const file = await store.load(match.groups.token)
+    const embed = file && await store.embed(file)
+    if (!embed?.read) return sendHtml(res, 404, notFoundPage(config))
+    try {
+      await sendBytes(req, res, {
+        size: embed.size,
+        read: embed.read,
+        headers: {
+          'Content-Type': 'video/mp4',
+          'Content-Disposition': 'inline',
+          'Content-Security-Policy': mediaPolicy,
           'Cross-Origin-Resource-Policy': 'cross-origin',
         },
       })
@@ -236,6 +266,7 @@ export function createApp(config, { owner, now = Date.now, log = console.log }) 
     { methods: READ, path: new RegExp(`^/raw/${TOKEN}(/[^/]*)?$`), access: 'public', handler: handleRaw },
     { methods: READ, path: new RegExp(`^/download/${TOKEN}(/[^/]*)?$`), access: 'public', handler: handleDownload },
     { methods: READ, path: new RegExp(`^/thumb/${TOKEN}\\.jpg$`), access: 'public', handler: handleThumb },
+    { methods: READ, path: new RegExp(`^/embed/${TOKEN}\\.mp4$`), access: 'public', handler: handleEmbed },
     { methods: ['POST'], path: /^\/logout$/, access: 'owner', csrf: true, handler: handleLogout },
     { methods: ['GET'], path: /^\/api\/files$/, access: 'owner', handler: handleList },
     { methods: ['POST'], path: /^\/api\/upload$/, access: 'owner', csrf: true, handler: handleUpload },
@@ -302,5 +333,5 @@ export function createApp(config, { owner, now = Date.now, log = console.log }) 
   server.keepAliveTimeout = 5_000
   server.timeout = 300_000
 
-  return { server, store, auth, routes, init: async () => { await store.init(); await auth.init() } }
+  return { server, store, auth, embeds, routes, init: async () => { await store.init(); await auth.init(); await embeds.init() } }
 }

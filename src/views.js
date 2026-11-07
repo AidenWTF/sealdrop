@@ -103,12 +103,14 @@ export const paths = {
   raw: (token, name) => `/raw/${token}/${shellSafeName(name)}`,
   download: (token, name) => `/download/${token}/${shellSafeName(name)}`,
   thumb: (token) => `/thumb/${token}.jpg`,
+  embed: (token) => `/embed/${token}.mp4`,
 }
 
 // Images larger than this use the thumbnail in embeds, since Discord may refuse big ones.
 const MAX_EMBED_IMAGE = 8 * 1024 * 1024
 
-function embedTags(config, file) {
+// `embed` is the Discord-sized copy of a large video, when there is one.
+function embedTags(config, file, embed) {
   const { meta, token } = file
   const raw = config.origin + paths.raw(token, meta.name)
   const thumb = meta.hasThumb ? config.origin + paths.thumb(token) : null
@@ -127,13 +129,14 @@ function embedTags(config, file) {
     if (useRaw) tags.push(tag('og:image:type', meta.type))
     if (useRaw && meta.width) tags.push(tag('og:image:width', meta.width), tag('og:image:height', meta.height))
   } else if (meta.kind === 'video') {
-    const width = meta.width ?? 1280
-    const height = meta.height ?? 720
+    const video = embed ? config.origin + paths.embed(token) : raw
+    const width = (embed ?? meta).width ?? 1280
+    const height = (embed ?? meta).height ?? 720
     tags.push(
       tag('og:type', 'video.other'),
-      tag('og:video', raw), tag('og:video:url', raw), tag('og:video:secure_url', raw),
-      tag('og:video:type', meta.type), tag('og:video:width', width), tag('og:video:height', height),
-      named('twitter:card', 'player'), named('twitter:player', raw),
+      tag('og:video', video), tag('og:video:url', video), tag('og:video:secure_url', video),
+      tag('og:video:type', embed ? 'video/mp4' : meta.type), tag('og:video:width', width), tag('og:video:height', height),
+      named('twitter:card', 'player'), named('twitter:player', video),
       named('twitter:player:width', width), named('twitter:player:height', height),
     )
     if (thumb) tags.push(tag('og:image', thumb), tag('og:image:type', 'image/jpeg'), tag('og:image:width', width), tag('og:image:height', height), named('twitter:image', thumb))
@@ -173,7 +176,7 @@ function plainFileBody(meta, download) {
 </main>`
 }
 
-export function sharePage(config, file) {
+export function sharePage(config, file, embed = null) {
   const { meta, token } = file
   const raw = paths.raw(token, meta.name)
   const download = paths.download(token, meta.name)
@@ -185,7 +188,7 @@ export function sharePage(config, file) {
   }
   return page({
     title: meta.name,
-    head: embedTags(config, file),
+    head: embedTags(config, file, embed),
     bodyClass: 'center',
     body: meta.kind === 'file' ? plainFileBody(meta, download) : `<main class="share">
   ${previews[meta.kind]}
