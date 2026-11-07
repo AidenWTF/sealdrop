@@ -70,7 +70,7 @@ docker compose up -d --build
 
 ### With the bundled Caddy
 
-Set `CADDY_DOMAIN` in `.env` and make sure ports 80 and 443 are open.
+Uncomment the Caddy section at the bottom of `.env`, set `CADDY_DOMAIN` to your domain and `PUBLIC_URL` to `https://` plus that domain, and make sure ports 80 and 443 are open.
 
 ```bash
 docker compose -f docker-compose.caddy.yml run --rm -it app node src/setup.js

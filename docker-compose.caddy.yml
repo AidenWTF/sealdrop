@@ -47,7 +47,7 @@ services:
       - "${CADDY_HTTPS_PORT:-443}:443"
       - "${CADDY_HTTPS_PORT:-443}:443/udp"
     environment:
-      CADDY_DOMAIN: ${CADDY_DOMAIN}
+      CADDY_DOMAIN: ${CADDY_DOMAIN:?Set CADDY_DOMAIN in .env (uncomment the Caddy section)}
       APP_PORT: ${APP_PORT:-18446}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
