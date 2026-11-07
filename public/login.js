@@ -4,7 +4,7 @@ const form = document.getElementById('login')
 const codeRow = document.getElementById('code-row')
 const code = document.getElementById('code')
 const passkeyField = document.getElementById('passkey')
-const submit = document.getElementById('submit')
+const submit = document.getElementById('sign-in')
 const switcher = document.getElementById('switch')
 const errorBox = document.getElementById('passkey-error')
 
@@ -48,9 +48,12 @@ form.addEventListener('submit', async (event) => {
       authenticatorData: toText(response.authenticatorData),
       signature: toText(response.signature),
     })
-    form.submit()
+    // The form's own submit(), which a control named or with the id "submit" would hide.
+    HTMLFormElement.prototype.submit.call(form)
   } catch (err) {
-    errorBox.textContent = err?.name === 'NotAllowedError' ? 'The passkey request was cancelled or timed out.' : 'This passkey could not be used.'
+    errorBox.textContent = err?.name === 'NotAllowedError'
+      ? 'The passkey request was cancelled or timed out.'
+      : `This passkey could not be used (${err?.name ?? 'Error'}: ${err?.message ?? 'unknown'}).`
     errorBox.hidden = false
     submit.disabled = false
   }

@@ -148,6 +148,8 @@ test('codes can be turned off once a passkey exists, and come back when the last
   const { ctx, session, json, passkey } = await setup(t)
   const codes = (allowed) => fetch(`${ctx.base}/api/settings/codes`, { method: 'POST', headers: json, body: JSON.stringify({ allowed }) })
 
+  assert.equal((await codes(false)).status, 409, 'not before the passkey has worked once, so a broken one cannot lock the owner out')
+  assert.equal((await passkeyLogin(ctx, passkey.assert(await challenge(ctx), ctx.base))).status, 303)
   const off = await codes(false)
   assert.equal(off.status, 200)
   assert.equal((await off.json()).codesAllowed, false)
@@ -208,4 +210,18 @@ test('the CBOR reader refuses malformed and hostile input', () => {
   assert.throws(() => decodeCbor(Buffer.alloc(40, 0x81)), /too deep/)
   assert.throws(() => decodeCbor(Buffer.from([0x9f])), /indefinite/)
   assert.throws(() => decodeCbor(Buffer.from([0xc1, 0x00])), /tags/)
+})
+
+test('the login form can always be submitted by its script', async (t) => {
+  // A control named or with the id "submit" replaces form.submit(), which once made every
+  // passkey sign-in fail in the browser after the passkey itself had answered.
+  for (const hints of [{}, { DISCORD_COPIES: '0' }]) {
+    const ctx = await startApp(t, hints)
+    const page = await (await fetch(ctx.base)).text()
+    assert.ok(!/\b(id|name)="submit"/.test(page), 'no control shadows form.submit')
+    assert.match(page, /<button id="sign-in" class="primary" type="submit">/)
+  }
+  const script = await readFile(new URL('../public/login.js', import.meta.url), 'utf8')
+  assert.ok(!/\bform\.submit\(\)/.test(script), 'the script uses HTMLFormElement.prototype.submit')
+  assert.match(script, /getElementById\('sign-in'\)/)
 })

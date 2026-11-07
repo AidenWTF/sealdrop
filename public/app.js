@@ -354,11 +354,14 @@ function showSecurity({ passkeys, codesAllowed }) {
     return row
   }))
   const toggle = $('codes-allowed')
+  const proven = passkeys.some((p) => p.lastUsedAt)
   toggle.checked = codesAllowed
-  toggle.disabled = passkeys.length === 0
+  toggle.disabled = codesAllowed && !proven
   $('codes-note').textContent = passkeys.length === 0
     ? 'Add a passkey to be able to turn authenticator codes off.'
-    : codesAllowed
+    : !proven && codesAllowed
+      ? 'Sign out and sign in once with your passkey. Then you can turn authenticator codes off.'
+      : codesAllowed
       ? 'Codes still work as a backup. Turn them off to sign in with passkeys only.'
       : 'Only passkeys work. If you lose them, run setup on the server to turn codes back on.'
 }
@@ -414,7 +417,8 @@ $('codes-allowed')?.addEventListener('change', async (event) => {
   })
   if (response.ok) showSecurity(await response.json())
   else event.target.checked = !allowed
-  toast(response.ok ? (allowed ? 'Codes turned on' : 'Codes turned off') : 'Could not change that')
+  const problem = response.ok ? null : (await response.json().catch(() => ({}))).error
+  toast(response.ok ? (allowed ? 'Codes turned on' : 'Codes turned off') : problem ?? 'Could not change that')
 })
 
 refresh().catch(() => toast('Could not load your files'))

@@ -266,7 +266,7 @@ export function createApp(config, { owner, now = Date.now, log = console.log, oi
   async function handleCodesSetting(req, res, { session }) {
     const body = await readJson(req, 1024)
     if (typeof body?.allowed !== 'boolean') return refuse(req, res, 400, 'bad request')
-    if (!await auth.setCodesAllowed(session, body.allowed)) return sendJson(res, 409, { error: 'Add a passkey first.' })
+    if (!await auth.setCodesAllowed(session, body.allowed)) return sendJson(res, 409, { error: 'Sign in with a passkey once first.' })
     audit(body.allowed ? 'codes_enabled' : 'codes_disabled', { ip: clientIp(req) })
     sendJson(res, 200, await auth.passkeySettings(session))
   }

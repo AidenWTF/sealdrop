@@ -62,7 +62,7 @@ export function loginPage(config, error = '', hints = { hasPasskeys: false, code
     </label>
     <input id="passkey" type="hidden" name="passkey">
     ${codeRow}
-    <button id="submit" class="primary" type="submit">Sign in</button>
+    <button id="sign-in" class="primary" type="submit">Sign in</button>
     ${switcher}
   </form>
   ${hints.oidc ? `<div class="or"><span>or</span></div>

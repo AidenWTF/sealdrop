@@ -319,10 +319,11 @@ export class Auth {
     return true
   }
 
-  // Turning codes off leaves passkeys as the only second factor. Not allowed without one.
+  // Turning codes off leaves passkeys as the only second factor. Only allowed once a
+  // passkey has actually signed in, so a passkey that doesn't work can't lock the owner out.
   async setCodesAllowed(session, allowed) {
     const state = await readPasskeys(this.config.dataDir, session.masterKey)
-    if (!allowed && state.passkeys.length === 0) return false
+    if (!allowed && !state.passkeys.some((p) => p.lastUsedAt)) return false
     await this.#savePasskeys(session.masterKey, { ...state, codesAllowed: allowed })
     return true
   }
