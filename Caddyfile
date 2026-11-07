@@ -7,7 +7,7 @@
 	}
 }
 
-{$DOMAIN} {
+{$CADDY_DOMAIN} {
 	reverse_proxy app:{$APP_PORT:18446} {
 		flush_interval -1
 	}

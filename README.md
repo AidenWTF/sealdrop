@@ -41,7 +41,17 @@ You need a server with Docker and a domain pointing at it, with ports 80 and 443
 cp .env.example .env
 ```
 
-Set `DOMAIN` in `.env`. Ports are set there too: `HTTP_PORT` and `HTTPS_PORT` (default 80 and 443) are the ports on your server, and `APP_PORT` (default 18446) is the app's port inside Docker. Certificates are issued automatically only while 80 and 443 are reachable from the internet. Then create your account and start the site:
+Set `CADDY_DOMAIN` in `.env`. The settings are grouped there by setup:
+
+| Variable | Default | Used by | What it is |
+|---|---|---|---|
+| `CADDY_DOMAIN` | (required) | `docker-compose.yml` | Your domain. Caddy gets its HTTPS certificate for it. |
+| `CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT` | 80 / 443 | `docker-compose.yml` | Ports Caddy opens on your server. Certificates are issued automatically only while 80 and 443 are reachable from the internet. |
+| `APP_PORT` | 18446 | both compose files | The app's port inside Docker. Never opened on the server. |
+| `PUBLIC_URL` | `https://CADDY_DOMAIN` | both compose files | The site's public address. Required with `docker-compose.no-caddy.yml`. |
+| `SITE_NAME`, `MAX_UPLOAD_GB` | SealDrop, 50 | both compose files | Site title and upload size limit. |
+
+Then create your account and start the site:
 
 ```bash
 docker compose run --rm -it app node src/setup.js
@@ -52,6 +62,20 @@ docker compose up -d --build
 ```
 
 Setup shows a QR code for your authenticator app. Leave the password blank to have a strong one generated, and keep it in a password manager.
+
+### Behind an existing proxy (Coolify, Traefik, nginx)
+
+If your server already runs a reverse proxy that handles HTTPS, such as Coolify's, use `docker-compose.no-caddy.yml` instead. It is the same app without the bundled Caddy and publishes no ports, and it ignores the `CADDY_*` settings. Set `PUBLIC_URL` in `.env` to the address your proxy serves (for example `https://files.example.com`), and point the proxy at the app on `APP_PORT` (default 18446). Turn off the proxy's access logs, since they would record every secret link.
+
+```bash
+docker compose -f docker-compose.no-caddy.yml run --rm -it app node src/setup.js
+```
+
+```bash
+docker compose -f docker-compose.no-caddy.yml up -d --build
+```
+
+The app exits until setup has been run, so run setup before the first start.
 
 ## Running locally
 
