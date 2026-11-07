@@ -1,0 +1,13 @@
+{
+  "name": "sealdrop",
+  "version": "1.0.0",
+  "description": "Private single-owner file host: encrypted at rest, unguessable links, previews and Discord embeds.",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=22.9" },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/main.js",
+    "setup": "node --env-file-if-exists=.env src/setup.js",
+    "test": "node --test \"test/*.test.js\""
+  }
+}

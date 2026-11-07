@@ -1,0 +1,60 @@
+# Keeps logs from filling the disk, whatever an attacker sends.
+x-logging: &logging
+  driver: local
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    logging: *logging
+    networks:
+      - internal
+    environment:
+      PUBLIC_URL: https://${DOMAIN:?Set DOMAIN in .env}
+      TRUST_PROXY: "1"
+      SITE_NAME: ${SITE_NAME:-SealDrop}
+      MAX_UPLOAD_GB: ${MAX_UPLOAD_GB:-50}
+    volumes:
+      - data:/data
+    # The app is only reachable through Caddy: no ports are published.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    logging: *logging
+    networks:
+      - internal
+      - web
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+networks:
+  # The app has no route to the internet or anything else, only to Caddy.
+  internal:
+    internal: true
+  web:
+
+volumes:
+  data:
+  caddy_data:
+  caddy_config:

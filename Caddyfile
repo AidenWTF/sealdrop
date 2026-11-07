@@ -1,0 +1,14 @@
+# Caddy obtains and renews the HTTPS certificate automatically.
+# Do not add a "log" directive to the site below: access logs would record every secret
+# link. Error logs include the request address too, so those loggers are switched off.
+{
+	log {
+		exclude http.log.error http.handlers.reverse_proxy
+	}
+}
+
+{$DOMAIN} {
+	reverse_proxy app:8080 {
+		flush_interval -1
+	}
+}
