@@ -35,23 +35,30 @@ Read these, because they are limits of the design:
 
 ## Deploying
 
-You need a server with Docker and a domain pointing at it, with ports 80 and 443 open. Discord can only embed from a public HTTPS address.
+You need a server with Docker and a domain pointing at it. Discord can only embed from a public HTTPS address. There are two compose files:
+
+- **`docker-compose.yml`**: the app on its own, for a server that already runs a reverse proxy with HTTPS (Coolify, Traefik, nginx). It publishes no ports.
+- **`docker-compose.caddy.yml`**: the app with Caddy bundled, for a server with no proxy. Caddy takes ports 80 and 443 and gets the HTTPS certificate itself.
 
 ```bash
 cp .env.example .env
 ```
 
-Set `CADDY_DOMAIN` in `.env`. The settings are grouped there by setup:
+The settings in `.env` are grouped by setup:
 
 | Variable | Default | Used by | What it is |
 |---|---|---|---|
-| `CADDY_DOMAIN` | (required) | `docker-compose.yml` | Your domain. Caddy gets its HTTPS certificate for it. |
-| `CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT` | 80 / 443 | `docker-compose.yml` | Ports Caddy opens on your server. Certificates are issued automatically only while 80 and 443 are reachable from the internet. |
-| `APP_PORT` | 18446 | both compose files | The app's port inside Docker. Never opened on the server. |
-| `PUBLIC_URL` | `https://CADDY_DOMAIN` | both compose files | The site's public address. Required with `docker-compose.no-caddy.yml`. |
-| `SITE_NAME`, `MAX_UPLOAD_GB` | SealDrop, 50 | both compose files | Site title and upload size limit. |
+| `PUBLIC_URL` | `https://CADDY_DOMAIN` with Caddy | both | The site's public address. Required with `docker-compose.yml`. |
+| `APP_PORT` | 18446 | both | The app's port inside Docker. Never opened on the server. |
+| `SITE_NAME`, `MAX_UPLOAD_GB` | SealDrop, 50 | both | Site title and upload size limit. |
+| `CADDY_DOMAIN` | (required) | `docker-compose.caddy.yml` | Your domain. Caddy gets its HTTPS certificate for it. |
+| `CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT` | 80 / 443 | `docker-compose.caddy.yml` | Ports Caddy opens on your server. Certificates are issued automatically only while 80 and 443 are reachable from the internet. |
 
-Then create your account and start the site:
+The app exits until setup has been run, so create your account before the first start. Setup shows a QR code for your authenticator app. Leave the password blank to have a strong one generated, and keep it in a password manager.
+
+### Behind an existing proxy (Coolify, Traefik, nginx)
+
+Set `PUBLIC_URL` in `.env` to the address your proxy serves (for example `https://files.example.com`), and point the proxy at the app on `APP_PORT` (default 18446). Turn off the proxy's access logs, since they would record every secret link.
 
 ```bash
 docker compose run --rm -it app node src/setup.js
@@ -61,21 +68,17 @@ docker compose run --rm -it app node src/setup.js
 docker compose up -d --build
 ```
 
-Setup shows a QR code for your authenticator app. Leave the password blank to have a strong one generated, and keep it in a password manager.
+### With the bundled Caddy
 
-### Behind an existing proxy (Coolify, Traefik, nginx)
-
-If your server already runs a reverse proxy that handles HTTPS, such as Coolify's, use `docker-compose.no-caddy.yml` instead. It is the same app without the bundled Caddy and publishes no ports, and it ignores the `CADDY_*` settings. Set `PUBLIC_URL` in `.env` to the address your proxy serves (for example `https://files.example.com`), and point the proxy at the app on `APP_PORT` (default 18446). Turn off the proxy's access logs, since they would record every secret link.
+Set `CADDY_DOMAIN` in `.env` and make sure ports 80 and 443 are open.
 
 ```bash
-docker compose -f docker-compose.no-caddy.yml run --rm -it app node src/setup.js
+docker compose -f docker-compose.caddy.yml run --rm -it app node src/setup.js
 ```
 
 ```bash
-docker compose -f docker-compose.no-caddy.yml up -d --build
+docker compose -f docker-compose.caddy.yml up -d --build
 ```
-
-The app exits until setup has been run, so run setup before the first start.
 
 ## Running locally
 
@@ -115,6 +118,8 @@ Security events (sign-ins, refused attempts, uploads, deletions) go to the serve
 ```bash
 docker compose logs app
 ```
+
+With the bundled Caddy, add `-f docker-compose.caddy.yml` after `docker compose`.
 
 ## Tests
 
