@@ -246,3 +246,14 @@ button:focus-visible, .button:focus-visible, input:focus-visible, .drop:focus-wi
 .or::before, .or::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 .sso { display: flex; justify-content: center; width: 100%; min-height: 42px; align-items: center; text-decoration: none; }
 .who { display: flex; align-items: center; gap: 12px; }
+
+/* Short links */
+.shorten { display: flex; gap: 8px; margin-bottom: 10px; }
+.shorten input {
+  flex: 1; min-width: 0; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit;
+}
+.link-row { grid-template-columns: minmax(0, 1fr) auto; }
+.link-row .file-meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 640px) {
+  .link-row { grid-template-columns: minmax(0, 1fr); }
+}

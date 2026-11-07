@@ -50,6 +50,27 @@ export function fileKeys(tokenBytes) {
   }
 }
 
+// Short link codes: 10 base58 characters, about 58 bits. Short to type, and with the guess
+// limit on /s/ not something anyone can find by trying. As with file links, the code is the
+// key: the storage id and the key for the destination both come from it.
+const SHORT_LENGTH = 10
+export const SHORT_PATTERN = `[${BASE58}]{${SHORT_LENGTH}}`
+
+export function newShortCode() {
+  let out = ''
+  while (out.length < SHORT_LENGTH) {
+    for (const byte of randomBytes(32)) {
+      if (byte < 232 && out.length < SHORT_LENGTH) out += BASE58[byte % 58] // 232 = 4 * 58, no bias
+    }
+  }
+  return out
+}
+
+export function shortLinkKeys(code) {
+  const ikm = Buffer.from(`short:${code}`)
+  return { id: derive(ikm, 'short-id', 16).toString('hex'), target: derive(ikm, 'short-target') }
+}
+
 // A Pocket ID (OIDC) member's master key, from the server's MEMBER_KEY and their account id.
 // Whoever holds MEMBER_KEY and the disk can open members' file lists, so keep it off the disk.
 export const memberMasterKey = (serverKey, sub) => derive(serverKey, `member/${sub}`)

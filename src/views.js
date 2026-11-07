@@ -111,6 +111,12 @@ export function dashboardPage(config, session) {
   </div>
   <p id="empty" class="muted" hidden>Nothing uploaded yet.</p>
   <ul id="files" class="files"></ul>
+  <h2>Short links</h2>
+  <form id="shorten" class="shorten">
+    <input id="long-url" type="url" placeholder="https://example.com/a/very/long/address" aria-label="Address to shorten" maxlength="2048" required>
+    <button class="primary" type="submit">Shorten</button>
+  </form>
+  <ul id="links" class="files links"></ul>
 ${session.member ? '' : `  <details id="security" class="card security">
     <summary>Sign-in and passkeys</summary>
     <p class="muted">Sign in with your password plus a passkey instead of an authenticator code. Passkeys live in your password manager, phone or security key.</p>

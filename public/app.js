@@ -280,6 +280,57 @@ $('logout').addEventListener('click', async () => {
   window.location.replace('/')
 })
 
+// Short links
+function linkRow(link) {
+  const row = el('li', 'file link-row')
+  const text = el('div', 'file-text')
+  const short = el('a', 'file-name', link.shortUrl.replace(/^https?:\/\//, ''))
+  short.href = link.shortUrl
+  short.target = '_blank'
+  short.rel = 'noopener noreferrer'
+  const target = el('div', 'file-meta', `→ ${link.url}`)
+  target.title = link.url
+  text.append(short, target)
+  const actions = el('div', 'actions')
+  const copyShort = el('button', 'primary', 'Copy')
+  copyShort.type = 'button'
+  copyShort.onclick = () => copy(link.shortUrl, 'Short link copied')
+  const remove = el('button', 'danger', 'Delete')
+  remove.type = 'button'
+  remove.onclick = async () => {
+    if (!window.confirm(`Delete ${link.shortUrl}? It stops working immediately.`)) return
+    const response = await api(`/api/links/${link.code}`, { method: 'DELETE' })
+    toast(response.ok ? 'Deleted' : 'Could not delete')
+    await loadLinks()
+  }
+  actions.append(copyShort, remove)
+  row.append(text, actions)
+  return row
+}
+
+async function loadLinks() {
+  const response = await api('/api/links')
+  if (!response.ok) return
+  const { links } = await response.json()
+  $('links').replaceChildren(...links.map(linkRow))
+}
+
+$('shorten').addEventListener('submit', async (event) => {
+  event.preventDefault()
+  const response = await api('/api/links', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url: $('long-url').value }),
+  })
+  const result = await response.json().catch(() => ({}))
+  if (!response.ok) return toast(result.error ?? 'Could not shorten that')
+  $('long-url').value = ''
+  await copy(result.shortUrl, 'Short link copied')
+  await loadLinks()
+})
+
+loadLinks().catch(() => {})
+
 // Passkeys
 const toBytes = (text) => Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
 const toText = (buffer) => btoa(String.fromCharCode(...new Uint8Array(buffer))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')

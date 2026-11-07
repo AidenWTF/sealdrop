@@ -6,7 +6,8 @@ import { createEmbedQueue } from './embeds.js'
 import { MetadataError, cleanJpeg } from './jpegclean.js'
 import { PREVIEW_BYTES, decodePreview } from './textview.js'
 import { Oidc, OidcError } from './oidc.js'
-import { memberMasterKey, sha256 } from './crypto.js'
+import { SHORT_PATTERN, memberMasterKey, sha256 } from './crypto.js'
+import { Links, cleanTarget } from './links.js'
 import { attachmentHeader, cleanFileName, sendBytes } from './http.js'
 import { analyze, sniff } from './media.js'
 import { Store } from './store.js'
@@ -17,7 +18,7 @@ const staticFile = (name, type) => ({
   type,
 })
 
-const ROBOTS = 'User-agent: Discordbot\nAllow: /file/\nAllow: /raw/\nAllow: /thumb/\nAllow: /embed/\n\nUser-agent: *\nDisallow: /\n'
+const ROBOTS = 'User-agent: Discordbot\nAllow: /file/\nAllow: /raw/\nAllow: /thumb/\nAllow: /embed/\nAllow: /s/\n\nUser-agent: *\nDisallow: /\n'
 
 const htmlPolicy = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
 // Share pages run no script at all.
@@ -33,6 +34,11 @@ export function createApp(config, { owner, now = Date.now, log = console.log, oi
   const store = new Store(config.dataDir)
   const auth = new Auth({ owner, config, audit, now })
   const embeds = createEmbedQueue({ store, config, audit })
+  const links = new Links(config.dataDir)
+  // Wrong short link codes per IP. Codes can't be found by trying, and this keeps it so.
+  const shortMisses = new Map()
+  const SHORT_MISS_LIMIT = 30
+  const SHORT_MISS_WINDOW = 15 * 60_000
   const oidc = config.oidc && new Oidc({ ...config.oidc, redirectUri: `${config.origin}/oidc/callback`, now, fetchFn: oidcFetch })
   const oidcCookieName = `${config.secure ? '__Host-' : ''}sealdrop_oidc`
   const queueEmbed = (file) => embeds.consider(file).catch((err) => audit('embed_error', { code: err.code ?? 'unknown' }))
@@ -137,6 +143,46 @@ export function createApp(config, { owner, now = Date.now, log = console.log, oi
   }
 
   const handleLoginChallenge = (req, res) => sendJson(res, 200, auth.loginChallenge())
+
+  const shortUrl = (code) => `${config.origin}/s/${code}`
+
+  async function handleShortRedirect(req, res, { match }) {
+    const ip = clientIp(req)
+    const time = now()
+    const misses = (shortMisses.get(ip) ?? []).filter((at) => time - at < SHORT_MISS_WINDOW)
+    if (misses.length >= SHORT_MISS_LIMIT) {
+      audit('short_blocked', { ip })
+      res.writeHead(429, { 'Content-Type': 'text/plain; charset=utf-8', 'Retry-After': '900' })
+      return res.end('Too many unknown short links. Try again later.\n')
+    }
+    const target = await links.resolve(match.groups.code)
+    if (!target) {
+      if (shortMisses.size > 10_000) shortMisses.clear()
+      shortMisses.set(ip, [...misses, time])
+      return sendHtml(res, 404, notFoundPage(config))
+    }
+    res.writeHead(302, { Location: target.url, 'Content-Type': 'text/plain; charset=utf-8' })
+    res.end(req.method === 'HEAD' ? undefined : `Redirecting to ${target.url}\n`)
+  }
+
+  async function handleListLinks(req, res, { session }) {
+    const found = await links.list(session.masterKey)
+    sendJson(res, 200, { links: found.map((l) => ({ ...l, shortUrl: shortUrl(l.code) })) })
+  }
+
+  async function handleCreateLink(req, res, { session }) {
+    const body = await readJson(req, 8192)
+    const url = cleanTarget(body?.url)
+    if (!url) return sendJson(res, 400, { error: 'Use a full web address starting with https:// or http://.' })
+    const created = await links.create(url, session.masterKey, now())
+    audit('short_created', { ip: clientIp(req) })
+    sendJson(res, 201, { ...created, shortUrl: shortUrl(created.code) })
+  }
+
+  async function handleDeleteLink(req, res, { session, match }) {
+    const removed = await links.remove(match.groups.code, session.masterKey)
+    sendJson(res, removed ? 200 : 404, { removed })
+  }
 
   // Sign-in through the OIDC provider. The cookie ties the provider's answer to the browser
   // that asked, and is Lax because that answer arrives as a navigation from another site.
@@ -472,6 +518,10 @@ export function createApp(config, { owner, now = Date.now, log = console.log, oi
     { methods: READ, path: new RegExp(`^/download/${TOKEN}(/[^/]*)?$`), access: 'public', handler: handleDownload },
     { methods: READ, path: new RegExp(`^/thumb/${TOKEN}\\.jpg$`), access: 'public', handler: handleThumb },
     { methods: READ, path: new RegExp(`^/embed/${TOKEN}\\.mp4$`), access: 'public', handler: handleEmbed },
+    { methods: READ, path: new RegExp(`^/s/(?<code>${SHORT_PATTERN})$`), access: 'public', handler: handleShortRedirect },
+    { methods: ['GET'], path: /^\/api\/links$/, access: 'owner', handler: handleListLinks },
+    { methods: ['POST'], path: /^\/api\/links$/, access: 'owner', csrf: true, handler: handleCreateLink },
+    { methods: ['DELETE'], path: new RegExp(`^/api/links/(?<code>${SHORT_PATTERN})$`), access: 'owner', csrf: true, handler: handleDeleteLink },
     { methods: ['POST'], path: /^\/logout$/, access: 'owner', csrf: true, handler: handleLogout },
     { methods: ['GET'], path: /^\/api\/files$/, access: 'owner', handler: handleList },
     { methods: ['POST'], path: /^\/api\/upload$/, access: 'owner', csrf: true, handler: handleUpload },
@@ -561,6 +611,6 @@ export function createApp(config, { owner, now = Date.now, log = console.log, oi
 
   return {
     server, store, auth, embeds, routes, sweep,
-    init: async () => { await store.init(); await auth.init(); await embeds.init(); await sweep() },
+    init: async () => { await store.init(); await auth.init(); await embeds.init(); await links.init(); await sweep() },
   }
 }
