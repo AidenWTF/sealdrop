@@ -75,9 +75,10 @@ async function enrollAuthenticator(secret) {
 
 const reset = process.argv.includes('--reset')
 const path = ownerPath(config.dataDir)
+const existed = existsSync(path)
 let secrets
 
-if (existsSync(path) && !reset) {
+if (existed && !reset) {
   console.log('An owner already exists. Changing the password and authenticator requires the current password.')
   const unlocked = await unlockOwner(await loadOwner(config.dataDir), await ask('Current password: ', { hidden: true }))
   if (!unlocked) {
@@ -87,7 +88,7 @@ if (existsSync(path) && !reset) {
   // The master key is kept, so the dashboard still lists every existing file.
   secrets = { masterKey: unlocked.masterKey, totpSecret: randomBytes(20) }
 } else {
-  if (reset && existsSync(path)) {
+  if (reset && existed) {
     console.log('RESET: this replaces the owner. Existing links keep working, but those files disappear from your dashboard for good.')
     if (await ask('Type RESET to continue: ') !== 'RESET') {
       console.log('Nothing was changed.')
@@ -101,5 +102,7 @@ const password = await choosePassword()
 await enrollAuthenticator(secrets.totpSecret)
 await writeOwner(config.dataDir, password, secrets)
 await rm(join(config.dataDir, DEVICES_FILE), { force: true })
-console.log(`\nOwner saved to ${path}. Restart the server for this to take effect.`)
+console.log(existed
+  ? `\nOwner saved to ${path}. Restart the server for this to take effect.`
+  : `\nOwner saved to ${path}. A server waiting for setup starts the site within a few seconds.`)
 rl.close()

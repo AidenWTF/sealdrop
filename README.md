@@ -54,7 +54,7 @@ The settings in `.env` are grouped by setup:
 | `CADDY_DOMAIN` | (required) | `docker-compose.caddy.yml` | Your domain. Caddy gets its HTTPS certificate for it. |
 | `CADDY_HTTP_PORT` / `CADDY_HTTPS_PORT` | 80 / 443 | `docker-compose.caddy.yml` | Ports Caddy opens on your server. Certificates are issued automatically only while 80 and 443 are reachable from the internet. |
 
-The app exits until setup has been run, so create your account before the first start. Setup shows a QR code for your authenticator app. Leave the password blank to have a strong one generated, and keep it in a password manager.
+You create your account with the setup command, either before the first start or while the app is running. Until then the site only answers "not set up yet", and it switches to the real site by itself a few seconds after setup finishes, with no restart. Setup shows a QR code for your authenticator app. Leave the password blank to have a strong one generated, and keep it in a password manager.
 
 ### Behind an existing proxy (Coolify, Traefik, nginx)
 
@@ -67,6 +67,8 @@ docker compose run --rm -it app node src/setup.js
 ```bash
 docker compose up -d --build
 ```
+
+On Coolify, deploy first, then open the app container's terminal in Coolify and run `node src/setup.js` there.
 
 ### With the bundled Caddy
 

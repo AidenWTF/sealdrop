@@ -107,17 +107,50 @@ test('changing the password keeps the master key, so files stay listed', async (
   await assert.rejects(stat(join(dir, 'devices.json')), 'trusted browsers are forgotten')
 })
 
-test('the server refuses an owner file others can read, and refuses to start without one', async (t) => {
+test('the server refuses an owner file others can read', async (t) => {
   const dir = await tempDir(t)
   await writeOwner(dir, PASSWORD, newSecrets(), { N: 2 ** 12, r: 8, p: 1 })
   await chmod(ownerPath(dir), 0o644)
   await assert.rejects(loadOwner(dir), /chmod 600/)
+  assert.ok(loadConfig({ DATA_DIR: dir }).dataDir === dir)
+})
 
-  const empty = await tempDir(t)
-  const exit = await new Promise((resolve) => {
-    spawn(process.execPath, ['src/main.js'], { cwd: root, env: { ...process.env, DATA_DIR: empty, PORT: '0' } })
-      .on('close', resolve)
+test('without an owner the server stays up, answers 503, and starts once setup is done', async (t) => {
+  const dir = await tempDir(t)
+  const child = spawn(process.execPath, ['src/main.js'], {
+    cwd: root, env: { ...process.env, DATA_DIR: dir, PORT: '0', HOST: '127.0.0.1' },
   })
-  assert.equal(exit, 1)
-  assert.ok(loadConfig({ DATA_DIR: empty }).dataDir === empty)
+  const exited = new Promise((resolve) => child.on('close', resolve))
+  t.after(() => child.kill('SIGKILL'))
+  let output = ''
+  const seen = (pattern) => new Promise((resolve, reject) => {
+    const check = () => {
+      const match = pattern.exec(output)
+      if (match) {
+        child.stdout.off('data', onData)
+        child.stderr.off('data', onData)
+        resolve(match)
+      }
+    }
+    const onData = (piece) => { output += piece; check() }
+    child.stdout.on('data', onData)
+    child.stderr.on('data', onData)
+    child.once('close', () => reject(new Error(`server exited early:\n${output}`)))
+    check()
+  })
+
+  const [, waitingPort] = await seen(/Waiting for setup on [\d.]+:(\d+)/)
+  const waiting = await fetch(`http://127.0.0.1:${waitingPort}/`)
+  assert.equal(waiting.status, 503)
+  assert.match(await waiting.text(), /not set up yet/)
+  assert.equal(child.exitCode, null, 'it keeps running instead of exiting')
+
+  await writeOwner(dir, PASSWORD, newSecrets(), { N: 2 ** 12, r: 8, p: 1 })
+  const [, appPort] = await seen(/listening on [\d.]+:(\d+)/)
+  const ready = await fetch(`http://127.0.0.1:${appPort}/`, { redirect: 'manual' })
+  assert.notEqual(ready.status, 503)
+  await ready.arrayBuffer()
+
+  child.kill('SIGTERM')
+  assert.equal(await exited, 0)
 })
